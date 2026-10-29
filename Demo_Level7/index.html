@@ -1,0 +1,2346 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>椰树大教堂</title>
+<style>
+/* ========== 自定义鼠标指针 ========== */
+/* 图片：images/cursor-*.png — 32×32 PNG */
+
+/* 1. 游戏容器默认指针 — 箭头 */
+#game-container {
+    cursor: url('images/cursor-default.png') 2 2, auto;
+}
+
+/* 2. 可拖拽物品 — 张开手（grab 回退） */
+.inv-item {
+    cursor: url('images/cursor-grab.png') 16 16, grab;
+}
+
+/* 3. 统一：原生控件（<button>、滑块等）不继承自定义指针，这里显式指定 */
+button, input[type="range"] { cursor: url('images/cursor-default.png') 2 2, auto; }
+
+/* 3. 拖拽进行中 — 隐藏系统光标 */
+html.dragging,
+body.dragging,
+body.dragging * {
+    cursor: none !important;
+}
+
+/* 4. 光标跟随器（JS 动态创建） */
+#drag-cursor-follower {
+    position: fixed;
+    pointer-events: none;
+    z-index: 99999;
+    width: 32px;
+    height: 32px;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    transform: translate(-16px, -16px);
+}
+
+/* 5. 拖拽悬停有效目标 — 高亮 */
+body.dragging .drag-over-target {
+    filter: brightness(1.3) drop-shadow(0 0 6px cyan);
+}
+
+/* ============================================================
+   CSS RESET & BASE
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #0a0a0a;
+  overflow: hidden;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  width: 100vw; height: 100vh;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ============================================================
+   GAME CONTAINER — 1280×720 logical canvas, CSS scale
+   ============================================================ */
+#game-container {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  transform-origin: center center;
+  width: 1280px; height: 720px;
+  display: flex;
+  flex-direction: row;
+  background: #222;
+  box-shadow: 0 0 20px rgba(0,0,0,0.8);
+  overflow: hidden;
+}
+
+/* ============================================================
+   ROOM AREA — 1120×720
+   ============================================================ */
+#room-area {
+  width: 1120px; height: 720px;
+  position: relative;
+  overflow: hidden;
+  background: #444;
+}
+
+/* Subtle vignette — atmosphere only, not replacing any asset */
+#room-area::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 50;
+  box-shadow: inset 0 0 120px 40px rgba(0, 0, 0, 0.5);
+}
+
+/* ============================================================
+   ROOMS — all visuals from images/ folder only
+   ============================================================ */
+.room {
+  display: none;
+  position: absolute;
+  top: 0; left: 0;
+  width: 1120px; height: 720px;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.room.active-room { display: block; }
+
+#room-A { background-image: url('images/room-A-bg.png'); }
+#room-B { background-image: url('images/room-B-bg.png'); }
+#room-C { background-image: url('images/room-C-bg.png'); }
+
+/* ============================================================
+   ENTITIES (base)
+   ============================================================ */
+.entity {
+  position: absolute;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.entity.clickable {
+  transition: filter 0.2s, transform 0.2s;
+}
+.entity.clickable:hover {
+  filter: brightness(1.2);
+}
+
+/* ============================================================
+   ROOM A ENTITIES
+   ============================================================ */
+
+/* Coconut God Statue — bottom-aligned */
+#entity-statue {
+  left: 180px; bottom: 0;
+  width: 320px; height: 480px;
+  background-image: url('images/npc-statue.png');
+  z-index: 2;
+  cursor: url('images/cursor-grab.png') 16 16, grab;
+}
+#entity-statue.drop-highlight {
+  filter: brightness(1.3);
+}
+#entity-statue.offered {
+  background-image: url('images/npc-statue-offered.png');
+}
+
+/* Coconut ground entities — scattered around statue base */
+.entity-coconut {
+  width: 40px; height: 40px;
+  background-image: url('images/item-coconut.png');
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  z-index: 3;
+  transition: transform 0.2s, filter 0.2s;
+  cursor: url('images/cursor-grab.png') 16 16, grab;
+  
+}
+.entity-coconut:hover {
+  filter: brightness(1.3);
+}
+.entity-coconut.collected { display: none; }
+@keyframes coconutIdle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+#entity-coconut-1 { left: 290px; bottom: 0px;  animation-delay: 0s; }
+#entity-coconut-2 { left: 250px; bottom: 5px;  animation-delay: 0.5s; }
+#entity-coconut-3 { left: 360px; bottom: 0px;  animation-delay: 1s; }
+
+/* ============================================================
+   ROOM B ENTITIES
+   ============================================================ */
+
+/* 5 Nuns on pews — scattered */
+.entity-nun {
+  background-image: url('images/npc-nun.png');
+  z-index: 2;
+  transition: transform 0.2s, filter 0.2s;
+  cursor: url('images/cursor-grab.png') 16 16, grab;
+}
+.entity-nun:hover {
+  filter: brightness(1.2);
+}
+/* 修女5立绘对话期间（尚未去过 roomC），修女1–4 点击无效：
+   撤掉手型与悬停高亮，避免出现「看着能点、点了没反应」的假交互 */
+.entity-nun.locked {
+  cursor: url('images/cursor-default.png') 2 2, auto;
+}
+.entity-nun.locked:hover {
+  filter: none;
+}
+
+#entity-nun-1 { width: 96px; height: 96px; left: 200px; top: 515px; }
+#entity-nun-2 { width: 50px; height: 50px; left: 400px; top: 500px; }
+#entity-nun-3 { width: 40px; height: 40px; left: 650px; top: 500px; }
+#entity-nun-4 { width: 70px; height: 70px; left: 720px; top: 490px; }
+#entity-nun-5 { width: 130px; height: 130px; left: 840px; top: 517px; }
+
+/* Center NPC — Room B center, 1:2 ratio */
+#entity-center-npc {
+  left: 50%; top:406px;
+  transform: translate(-50%, -50%);
+  width: 175px; height: 350px;
+  background-image: url('images/npc-center.png');
+  border-radius: 8px;
+  z-index: 5;
+}
+#entity-center-npc.clickable {
+  transition: filter 0.2s, background-color 0.2s, box-shadow 0.2s;
+}
+#entity-center-npc.clickable:hover {
+  filter: brightness(1.2);
+}
+
+/* Full nun portrait — appears with nun-5 dialogue, behind dialog */
+#entity-nun-full {
+  display: none;
+  position: absolute;
+  left: 50%; top: 180px;
+  transform: translateX(-50%);
+  width: 300px; height: 450px;
+  background-image: url('images/npc-nun-full.png');
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  z-index: 180;
+}
+#entity-nun-full.visible { display: block; }
+#entity-nun-full.clickable { transition: filter 0.2s; cursor: url('images/cursor-grab.png') 16 16, grab; }
+#entity-nun-full.clickable:hover { filter: brightness(1.2); }
+
+/* ============================================================
+   ROOM C — DRESS-UP INTERFACE
+   ============================================================ */
+
+/* Dress-up area container — left 2/3 */
+#dress-area {
+  position: absolute;
+  left: 0; top: 0;
+  width: 747px; height: 720px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+/* Character model wrapper */
+#dress-model {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+/* Arrow buttons — image-based, sized to match dress parts */
+.dress-arrow {
+  width: 64px; height: 64px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  border: none;
+  background-color: transparent;
+  cursor: url('images/cursor-default.png') 2 2, auto;
+  z-index: 3;
+  user-select: none;
+  opacity: 0.75;
+  transition: all 0.2s;
+  font-size: 0; color: transparent;
+}
+.dress-arrow:hover {
+  opacity: 1;
+}
+.dress-arrow:active {
+  opacity: 0.9;
+}
+
+/* Dress part display areas — individually proportioned, all share same height, seamlessly connected */
+.dress-part {
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  border: none;
+  transition: background-image 0.3s;
+}
+
+/* Individual dress part proportions — common width 300px, heights per 1200-wide source */
+/* Head:  1200×464  → 300×116 */
+/* Upper: 1200×1912 → 300×478 */
+/* Lower: 1200×319  → 300×80  */
+#dress-head  { width: 300px; height: calc(300px * 464 / 1200);  }
+#dress-upper { width: 300px; height: calc(300px * 1912 / 1200); }
+#dress-lower { width: 300px; height: calc(300px * 319 / 1200);  }
+
+/* Collapse vertical gaps between dress part rows so parts connect seamlessly */
+.dress-part-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin: 0;
+  padding: 0;
+  line-height: 0;
+  font-size: 0;
+}
+
+/* Right panel — 1/3 of room */
+#dress-panel {
+  position: absolute;
+  right: 0; top: 0;
+  width: 373px; height: 720px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 40px;
+  z-index: 2;
+  padding: 60px 20px;
+}
+
+/* Coconut indicators — 2 rows: top 4, bottom 3 */
+#coconut-indicators {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+}
+.coco-row {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  align-items: center;
+}
+.coco-indicator {
+  width: 50px; height: 50px;
+  background-image: url('images/coconut-unlit.png');
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  opacity: 0.35;
+  transition: all 0.5s;
+}
+.coco-indicator.lit {
+  background-image: url('images/coconut-lit.png');
+  opacity: 1;
+  box-shadow: 0 0 12px 3px rgba(255, 215, 0, 0.6);
+  animation: coconutGlow 1.5s ease-in-out infinite;
+}
+@keyframes coconutGlow {
+  0%, 100% { box-shadow: 0 0 8px 2px rgba(255, 215, 0, 0.4); }
+  50% { box-shadow: 0 0 20px 5px rgba(255, 215, 0, 0.8); }
+}
+
+/* Submit button */
+#dress-submit {
+  width: 100%;
+  max-width: 340px;
+  padding: 18px 0;
+  background: linear-gradient(135deg, #8B7355 0%, #6B5340 50%, #8B7355 100%);
+  border: 2px solid #c9a96e;
+  border-radius: 12px;
+  color: #f5e6d3;
+  font-size: 22px;
+  font-weight: bold;
+  letter-spacing: 4px;
+  cursor: url('images/cursor-default.png') 2 2, auto;
+  transition: all 0.3s;
+  z-index: 3;
+}
+#dress-submit:hover {
+  background: linear-gradient(135deg, #a08865 0%, #8B7355 50%, #a08865 100%);
+  box-shadow: 0 4px 20px rgba(201, 169, 110, 0.4);
+}
+#dress-submit:active {
+  opacity: 0.9;
+}
+#dress-submit.complete-all {
+  background: linear-gradient(135deg, #ffd700 0%, #ffaa00 50%, #ffd700 100%);
+  border-color: #fff;
+  color: #3a2010;
+  animation: btnCelebrate 0.8s ease-in-out infinite;
+}
+@keyframes btnCelebrate {
+  0%, 100% { box-shadow: 0 0 15px 5px rgba(255, 215, 0, 0.5); }
+  50% { box-shadow: 0 0 35px 12px rgba(255, 215, 0, 0.9); }
+}
+
+/* ============================================================
+   DIALOG BOX — white semi-transparent per spec §4
+   ============================================================ */
+#dialog-box {
+  position: absolute;
+  bottom: 40px; left: 160px;
+  width: 800px;
+  min-height: 70px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 3px solid #333;
+  border-radius: 15px;
+  color: #000;
+  font-size: 20px;
+  line-height: 1.7;
+  padding: 20px;
+  z-index: 10001;
+  display: none;
+  text-align: center;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+  box-sizing: border-box;
+}
+#dialog-box.visible {
+  display: block;
+  animation: dialogIn 0.35s ease-out;
+}
+@keyframes dialogIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 对话框模态锁：对话框显示期间锁定整个游戏界面，仅对话框本身可点击 */
+#dialog-lock {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  z-index: 10000; display: none;
+}
+#dialog-lock.show { display: block; }
+
+/* Speech bubble for nuns 1-4 */
+.speech-bubble {
+  position: absolute;
+  background: rgba(30, 20, 40, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  color: #ccc;
+  font-size: 20px;
+  padding: 8px 20px;
+  z-index: 190;
+  display: none;
+  white-space: nowrap;
+}
+.speech-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -8px; left: 50%;
+  transform: translateX(-50%);
+  width: 0; height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 8px solid rgba(30, 20, 40, 0.9);
+}
+.speech-bubble.show { display: block; animation: bubbleIn 0.2s ease-out; }
+@keyframes bubbleIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================
+   NAVIGATION BUTTONS
+   ============================================================ */
+.nav-btn {
+  position: absolute;
+  top: 335px;
+  width: 50px; height: 60px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  z-index: 150;
+  opacity: 0.7;
+  transition: opacity 0.3s, transform 0.2s;
+  display: none;
+}
+.nav-btn:hover {
+  filter: brightness(1.2);
+}
+.nav-btn.visible { display: block; }
+
+#nav-left  { left:  12px; background-image: url('images/nav-left.png'); }
+#nav-right { right: 12px; background-image: url('images/nav-right.png'); }
+
+/* ============================================================
+   INVENTORY — 160×720
+   ============================================================ */
+#ui-inventory {
+  width: 160px; height: 720px;
+  background-image: url('images/ui-inventory-bg.png');
+  background-size: cover;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  padding: 15px 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  align-items: center;
+  z-index: 100;
+  border-left: 2px solid #000;
+  box-sizing: border-box;
+}
+#ui-inventory::-webkit-scrollbar { display: none; }
+
+.inv-slot {
+  width: 120px; height: 120px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid #333;
+  border-radius: 5px;
+  flex-shrink: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.inv-slot:empty { border-style: dashed; }
+
+.inv-item {
+  width: 100%; height: 100%;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  border-radius: 3px;
+}
+
+.inv-count {
+  position: absolute;
+  bottom: 5px; right: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #ffd700;
+  font-size: 14px;
+  font-weight: bold;
+  padding: 1px 6px;
+  border-radius: 8px;
+  pointer-events: none; /* 防止干扰拖拽 */
+}
+
+/* ============================================================
+   SETTINGS
+   ============================================================ */
+#settings-btn {
+  position: absolute;
+  top: 12px; right: 172px;
+  width: 42px; height: 42px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+#settings-btn:hover {
+  background: rgba(0, 0, 0, 0.75);
+  border-color: rgba(255, 255, 255, 0.6);
+  transform: rotate(30deg);
+}
+#settings-btn svg {
+  width: 24px; height: 24px;
+  fill: rgba(255, 255, 255, 0.85);
+}
+
+/* Backpack button — same style as settings, positioned next to it */
+#backpack-btn {
+  position: absolute;
+  top: 12px; right: 222px;
+  width: 42px; height: 42px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+#backpack-btn:hover {
+  background: rgba(0, 0, 0, 0.75);
+  border-color: rgba(255, 255, 255, 0.6);
+}
+#backpack-btn svg {
+  width: 24px; height: 24px;
+  fill: rgba(255, 255, 255, 0.85);
+}
+
+#backpack-overlay {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 400;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+#backpack-overlay.show { display: flex; }
+
+#backpack-panel {
+  position: relative;
+  width: 340px;
+  background: rgba(20, 20, 30, 0.92);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  padding: 32px 28px 28px;
+  color: #e0e0e0;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+#backpack-panel h3 {
+  text-align: center;
+  margin-bottom: 20px;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: 2px;
+  color: #fff;
+}
+
+#backpack-close-btn {
+  position: absolute;
+  top: 10px; right: 16px;
+  width: 32px; height: 32px;
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 24px;
+  transition: color 0.2s;
+  line-height: 32px;
+  text-align: center;
+  padding: 0;
+}
+#backpack-close-btn:hover { color: #fff; }
+
+/* 3×3 backpack grid */
+#backpack-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 84px);
+  grid-template-rows: repeat(3, 84px);
+  gap: 10px;
+  justify-content: center;
+}
+
+.bp-slot {
+  width: 84px; height: 84px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 2px dashed #444;
+  border-radius: 6px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bp-item {
+  width: 100%; height: 100%;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+#settings-overlay {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 400;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+#settings-overlay.show {
+  display: flex;
+}
+
+#settings-panel {
+  position: relative;
+  width: 400px;
+  background: rgba(20, 20, 30, 0.92);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  padding: 32px 36px 28px;
+  color: #e0e0e0;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+#settings-panel h3 {
+  text-align: center;
+  margin-bottom: 24px;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: 2px;
+  color: #fff;
+}
+
+/* Close button (§5.8) */
+#settings-close-btn {
+  position: absolute;
+  top: 10px; right: 16px;
+  width: 32px; height: 32px;
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 24px;
+  transition: color 0.2s;
+  line-height: 32px;
+  text-align: center;
+  padding: 0;
+}
+#settings-close-btn:hover { color: #fff; }
+
+/* Volume row (§5.5) */
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.vol-icon {
+  width: 22px; height: 22px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+.vol-label {
+  width: 56px;
+  text-align: right;
+  font-size: 15px;
+  color: #bbb;
+  flex-shrink: 0;
+}
+
+/* Custom range slider (§5.6) */
+.setting-row input[type="range"] {
+  flex: 1;
+  height: 6px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 3px;
+  outline: none;
+}
+.setting-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #888;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s ease;
+}
+.setting-row input[type="range"]::-webkit-slider-thumb:hover {
+  filter: brightness(1.2);
+}
+.setting-row input[type="range"]::-moz-range-thumb {
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #888;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+.setting-row input[type="range"]::-moz-range-thumb:hover {
+  filter: brightness(1.2);
+}
+.vol-value {
+  width: 36px;
+  text-align: center;
+  font-size: 14px;
+  color: #aaa;
+  flex-shrink: 0;
+}
+
+/* External link button (§5.7) */
+#settings-link-btn {
+  width: 100%;
+  margin-top: 24px;
+  padding: 12px 0;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 10px;
+  color: #ddd;
+  font-size: 16px;
+  letter-spacing: 1px;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+#settings-link-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.45);
+  color: #fff;
+}
+
+/* ============================================================
+   PICKUP OVERLAY — 道具拾取弹窗（严格模态）
+   ============================================================ */
+#pickup-overlay {
+  position: absolute; top: 0; left: 0;
+  width: 1120px; height: 720px;
+  background: rgba(0,0,0,0.7); z-index: 350; display: none;
+  align-items: center; justify-content: center;
+}
+#pickup-overlay.visible { display: flex; }
+#pickup-panel {
+  background: #1a1a2e; border: 2px solid #555; border-radius: 16px;
+  padding: 30px 40px; width: 300px; color: #fff;
+  text-align: center;
+}
+#pickup-panel h3 { margin-bottom: 20px; font-size: 20px; letter-spacing: 2px; }
+#pickup-item-img {
+  width: 100px; height: 100px;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  margin: 0 auto 12px;
+}
+#pickup-item-name { font-size: 16px; color: #ccc; margin-bottom: 24px; }
+#pickup-confirm-btn {
+  padding: 10px 40px;
+  background: #1eb045; border: none; border-radius: 8px;
+  color: #fff; font-size: 15px; cursor: url('images/cursor-default.png') 2 2, auto; letter-spacing: 2px;
+}
+#pickup-confirm-btn:hover { background: #137736; }
+
+/* ============================================================
+   横屏提示遮罩 — 移动端横屏锁屏提示（一次性、可关闭、6 秒自动消失）
+   ============================================================ */
+#landscape-hint {
+  position: fixed; inset: 0;
+  background: #0a0a0a;
+  z-index: 100000;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  color: #fff;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  text-align: center;
+  user-select: none; -webkit-user-select: none;
+}
+#landscape-hint.show { display: flex; }
+#landscape-hint-icon {
+  width: 76px; height: 76px;
+  animation: hintLockPulse 1.8s ease-in-out infinite;
+}
+@keyframes hintLockPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+#landscape-hint p { font-size: 18px; letter-spacing: 2px; opacity: 0.85; }
+#landscape-hint .hint-sub { font-size: 13px; opacity: 0.5; letter-spacing: 1px; }
+#landscape-hint-close {
+  margin-top: 8px;
+  padding: 10px 40px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 24px;
+  color: #ddd;
+  font-size: 15px;
+  letter-spacing: 2px;
+  cursor: url('images/cursor-default.png') 2 2, auto;
+  transition: background 0.2s, color 0.2s;
+}
+#landscape-hint-close:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+#return-btn {
+  position: absolute;
+  top: 12px; left: 12px;
+  width: 42px; height: 42px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  z-index: 300;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+#return-btn:hover { background: rgba(0, 0, 0, 0.75); border-color: rgba(255, 255, 255, 0.6); }
+#return-btn svg { width: 24px; height: 24px; fill: rgba(255, 255, 255, 0.85); }
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     AUDIO ELEMENTS
+     ============================================================ -->
+<audio id="bgm" src="audio/bgm.mp3" loop preload="none"></audio>
+<audio id="sfx-collect" src="audio/sfx-collect.mp3" preload="auto"></audio>
+<audio id="sfx-drop" src="audio/sfx-drop.mp3" preload="auto"></audio>
+<audio id="sfx-dialogue" src="audio/sfx-dialogue.mp3" preload="auto"></audio>
+<audio id="sfx-success" src="audio/sfx-success.mp3" preload="auto"></audio>
+<audio id="sfx-error" src="audio/sfx-error.mp3" preload="auto"></audio>
+<audio id="sfx-complete" src="audio/sfx-complete.mp3" preload="auto"></audio>
+<audio id="sfx-click" src="audio/sfx-click.mp3" preload="auto"></audio>
+<audio id="sfx-nav" src="audio/sfx-nav.mp3" preload="auto"></audio>
+
+<!-- ============================================================
+     GAME CONTAINER
+     ============================================================ -->
+<div id="game-container">
+
+  <!-- ========== ROOM AREA ========== -->
+  <div id="room-area">
+
+    <!-- ROOM A: 教堂前广场 -->
+    <div id="room-A" class="room active-room">
+
+      <!-- 椰神雕像 NPC — bottom-aligned -->
+      <div id="entity-statue" class="entity clickable"
+           data-drop-target="statue"
+           onclick="interact('statue')"
+          >
+      </div>
+
+      <!-- 三个椰子 -->
+      <div id="entity-coconut-1" class="entity entity-coconut"
+           onclick="collectCoconut(1)"></div>
+      <div id="entity-coconut-2" class="entity entity-coconut"
+           onclick="collectCoconut(2)"></div>
+      <div id="entity-coconut-3" class="entity entity-coconut"
+           onclick="collectCoconut(3)"></div>
+
+    </div>
+
+    <!-- ROOM B: 教堂内部 -->
+    <div id="room-B" class="room">
+
+      <!-- 五个修女 NPC -->
+      <div id="entity-nun-1" class="entity entity-nun clickable"
+           onclick="interactNun(1)"></div>
+      <div id="entity-nun-2" class="entity entity-nun clickable"
+           onclick="interactNun(2)"></div>
+      <div id="entity-nun-3" class="entity entity-nun clickable"
+           onclick="interactNun(3)"></div>
+      <div id="entity-nun-4" class="entity entity-nun clickable"
+           onclick="interactNun(4)"></div>
+      <div id="entity-nun-5" class="entity entity-nun clickable"
+           onclick="interactNun(5)"></div>
+
+      <!-- 画面中心 NPC — 1:2 矩形区域 -->
+      <div id="entity-center-npc" class="entity clickable"
+           onclick="interactCenterNpc()"></div>
+
+      <!-- 修女完整正面形象（对话时出现，特定状态下可点击） -->
+      <div id="entity-nun-full" onclick="clickNunPortrait()"></div>
+
+      <!-- 修女 1-4 的气泡（左上角定位） -->
+      <div id="bubble-nun-1" class="speech-bubble" style="left:160px; top:455px;">不许翘脚</div>
+      <div id="bubble-nun-2" class="speech-bubble" style="left:365px; top:440px;">不许玩手机</div>
+      <div id="bubble-nun-3" class="speech-bubble" style="left:610px; top:440px;">不许大声喧哗</div>
+      <div id="bubble-nun-4" class="speech-bubble" style="left:680px; top:430px;">不许吃东西</div>
+
+    </div>
+
+    <!-- ROOM C: 换装界面 -->
+    <div id="room-C" class="room">
+
+      <!-- 换装区域 — 左 2/3 -->
+      <div id="dress-area">
+        <div id="dress-model">
+          <!-- 头部 -->
+          <div class="dress-part-row">
+            <button class="dress-arrow" onclick="cycleDressPart('head', -1)" style="background-image: url('images/dress-arrow-left.png');"></button>
+            <div id="dress-head" class="dress-part" style="background-image: url('images/dress-head-1.png');"></div>
+            <button class="dress-arrow" onclick="cycleDressPart('head', 1)" style="background-image: url('images/dress-arrow-right.png');"></button>
+          </div>
+          <!-- 上身 -->
+          <div class="dress-part-row">
+            <button class="dress-arrow" onclick="cycleDressPart('upper', -1)" style="background-image: url('images/dress-arrow-left.png');"></button>
+            <div id="dress-upper" class="dress-part" style="background-image: url('images/dress-upper-1.png');"></div>
+            <button class="dress-arrow" onclick="cycleDressPart('upper', 1)" style="background-image: url('images/dress-arrow-right.png');"></button>
+          </div>
+          <!-- 下身 -->
+          <div class="dress-part-row">
+            <button class="dress-arrow" onclick="cycleDressPart('lower', -1)" style="background-image: url('images/dress-arrow-left.png');"></button>
+            <div id="dress-lower" class="dress-part" style="background-image: url('images/dress-lower-1.png');"></div>
+            <button class="dress-arrow" onclick="cycleDressPart('lower', 1)" style="background-image: url('images/dress-arrow-right.png');"></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧面板 — 1/3 -->
+      <div id="dress-panel">
+        <div id="coconut-indicators">
+          <div class="coco-row">
+            <div id="coco-0" class="coco-indicator"></div>
+            <div id="coco-1" class="coco-indicator"></div>
+            <div id="coco-2" class="coco-indicator"></div>
+            <div id="coco-3" class="coco-indicator"></div>
+          </div>
+          <div class="coco-row">
+            <div id="coco-4" class="coco-indicator"></div>
+            <div id="coco-5" class="coco-indicator"></div>
+            <div id="coco-6" class="coco-indicator"></div>
+          </div>
+        </div>
+        <button id="dress-submit" onclick="submitOutfit()">搭 配 好 啦</button>
+      </div>
+
+    </div>
+
+    <!-- ========== DIALOG BOX ========== -->
+    <div id="dialog-box" onclick="onDialogClick()"></div>
+
+    <!-- ========== NAVIGATION BUTTONS ========== -->
+    <div id="nav-left" class="nav-btn" onclick="changeRoom(-1)"></div>
+    <div id="nav-right" class="nav-btn" onclick="changeRoom(1)"></div>
+
+  </div>
+
+  <!-- ========== INVENTORY ========== -->
+  <div id="ui-inventory"></div>
+
+  <!-- 对话框模态锁：对话框显示期间锁定整个游戏界面 -->
+  <div id="dialog-lock"></div>
+
+  <!-- ========== BACKPACK BUTTON ========== -->
+  <div id="backpack-btn" onclick="toggleBackpack()" style="display:none">
+    <svg viewBox="0 0 24 24"><path d="M20 6h-4V4c0-1.1-.9-2-2-2h-4c-1.1 0-2 .9-2 2v2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zM10 4h4v2h-4V4zm10 16H4V8h16v12z"/><path d="M9 12h2v2H9zm4 0h2v2h-2z"/></svg>
+  </div>
+
+  <!-- ========== SETTINGS BUTTON ========== -->
+    <!-- 返回 Level0 -->
+  <div id="return-btn" onclick="returnToLevel0()">
+    <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+  </div>
+<div id="settings-btn" onclick="toggleSettings()">
+    <svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
+  </div>
+
+  <!-- ========== SETTINGS OVERLAY ========== -->
+  <div id="settings-overlay" onclick="if(event.target===this)toggleSettings()">
+    <div id="settings-panel" onclick="event.stopPropagation()">
+      <button id="settings-close-btn" onclick="toggleSettings()">&times;</button>
+      <h3>设 置</h3>
+      <div class="setting-row">
+        <svg class="vol-icon" viewBox="0 0 24 24" fill="rgba(255,255,255,0.7)"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+        <span class="vol-label">音乐</span>
+        <input type="range" id="vol-music" min="0" max="100" value="70" oninput="onMusicVolume(this.value)">
+        <span class="vol-value" id="vol-music-label">70</span>
+      </div>
+      <div class="setting-row">
+        <svg class="vol-icon" viewBox="0 0 24 24" fill="rgba(255,255,255,0.7)"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+        <span class="vol-label">音效</span>
+        <input type="range" id="vol-sfx" min="0" max="100" value="80" oninput="onSfxVolume(this.value)">
+        <span class="vol-value" id="vol-sfx-label">80</span>
+      </div>
+      <button id="settings-link-btn" onclick="openExternalLink()">查看更多内容 →</button>
+    </div>
+  </div>
+
+  <!-- ========== BACKPACK OVERLAY ========== -->
+  <div id="backpack-overlay" onclick="if(event.target===this)toggleBackpack()">
+    <div id="backpack-panel" onclick="event.stopPropagation()">
+      <button id="backpack-close-btn" onclick="toggleBackpack()">&times;</button>
+      <h3>背 包</h3>
+      <div id="backpack-grid">
+        <div class="bp-slot"></div><div class="bp-slot"></div><div class="bp-slot"></div>
+        <div class="bp-slot"></div><div class="bp-slot"></div><div class="bp-slot"></div>
+        <div class="bp-slot"></div><div class="bp-slot"></div><div class="bp-slot"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== PICKUP OVERLAY — 道具拾取弹窗（严格模态） ========== -->
+  <div id="pickup-overlay">
+    <div id="pickup-panel">
+      <h3>已回收至背包</h3>
+      <div id="pickup-item-img"></div>
+      <div id="pickup-item-name"></div>
+      <button id="pickup-confirm-btn" onclick="confirmPickup()">确 认</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- 横屏提示：建议锁定旋屏（一次性、可关闭、6 秒自动消失） -->
+<div id="landscape-hint">
+  <svg id="landscape-hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+  </svg>
+  <p>建议锁定竖屏再把手机横过来</p>
+  <p class="hint-sub">游玩体验更佳</p>
+  <button id="landscape-hint-close">知道了</button>
+</div>
+
+<!-- ============================================================
+     JAVASCRIPT — Complete Game Logic
+     ============================================================ -->
+<script>
+/* ================================================================
+   ① 设备识别（必须放在 <script> 最顶部，先于 resizeGame()）
+   生成 window.deviceInfo，并给 <html> 打上 device-* 类
+   ================================================================ */
+(function detectDevice() {
+  const ua = navigator.userAgent;
+
+  // 系统
+  const isIOS     = /iPhone|iPad|iPod/i.test(ua);
+  const isAndroid = /Android/i.test(ua);
+  const isMac     = /Mac/i.test(ua) && !isIOS;
+  const isWindows = /Windows/i.test(ua);
+
+  // 设备形态
+  const isTablet   = /iPad/i.test(ua) || (isAndroid && !/Mobile/i.test(ua));
+  const isMobileUA = /Mobi|Android|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  const isTouch    = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  const coarsePtr  = window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : false;
+  const noHover    = window.matchMedia ? window.matchMedia('(hover: none)').matches : false;
+  // 只有「主指针是粗指针且无悬停能力」才算触屏为主（手机/平板），
+  // 避免把带触屏的桌面笔记本误判成移动端。
+  const isTouchPrimary = coarsePtr && noHover;
+  const isMobile   = isMobileUA || isTouchPrimary;
+
+  // 浏览器
+  const isWeChat  = /MicroMessenger/i.test(ua);
+  const isQQ      = /QQ\//i.test(ua);
+  const isSafari  = /Safari/i.test(ua) && !/Chrome|CriOS|Edg|OPR/i.test(ua);
+  const isChrome  = /Chrome|CriOS/i.test(ua) && !/Edg|OPR/i.test(ua);
+  const isEdge    = /Edg/i.test(ua);
+  const isFirefox = /Firefox/i.test(ua);
+
+  const isPortrait = window.matchMedia
+    ? window.matchMedia('(orientation: portrait)').matches
+    : window.innerHeight > window.innerWidth;
+
+  window.deviceInfo = {
+    isMobile, isTablet, isMobileDevice: isMobile || isTablet, isDesktop: !isMobile && !isTablet,
+    isTouch, isIOS, isAndroid, isMac, isWindows,
+    isWeChat, isQQ, isSafari, isChrome, isEdge, isFirefox,
+    isPortrait, isLandscape: !isPortrait,
+    os: isIOS ? 'ios' : isAndroid ? 'android' : isWindows ? 'windows' : isMac ? 'mac' : 'other',
+    browser: isWeChat ? 'wechat' : isQQ ? 'qq' : isSafari ? 'safari'
+           : isEdge ? 'edge' : isFirefox ? 'firefox' : isChrome ? 'chrome' : 'other',
+    type: isMobile ? 'mobile' : isTablet ? 'tablet' : 'desktop'
+  };
+
+  const root = document.documentElement;
+  root.classList.add('device-' + deviceInfo.type);
+  root.setAttribute('data-device', deviceInfo.type);
+  if (deviceInfo.isTouch)     root.classList.add('device-touch');
+  if (deviceInfo.isIOS)       root.classList.add('device-ios');
+  if (deviceInfo.isAndroid)   root.classList.add('device-android');
+  if (deviceInfo.isWeChat)    root.classList.add('device-wechat');
+  if (deviceInfo.isPortrait)  root.classList.add('device-portrait');
+  else                        root.classList.add('device-landscape');
+
+  console.log('📱 设备识别:', deviceInfo);
+})();
+
+/* ================================================================
+   GLOBAL STATE — per template: single `state` object
+   ================================================================ */
+const state = {
+  inventory: [],              // [{id: string, count: number}]
+  currentRoomIndex: 0,        // 0=A, 1=B, 2=C
+  roomANavUnlocked: false,    // nav arrows unlock after statue dialogue
+  coconutsCollected: 0,       // 0–3 individual coconuts from ground
+  coconutsOffered: 0,         // 0–3 — one per drag, need 3
+  statueTalked: false,        // has statue dialogue played?
+  nun5FirstTalk: false,       // has nun-5 first dialogue played?
+  nun5DialogShown: false,     // first dialogue shown, waiting for second click → Room C
+  nun5Complete: false,        // has nun-5 given polaroid back?
+  dressHeadPos: 0,            // position in head permutation (0–5)
+  dressUpperPos: 0,           // position in upper permutation (0–5)
+  dressLowerPos: 0,           // position in lower permutation (0–5)
+  dressPermutations: { head: [0,1,2,3,4,5,6], upper: [0,1,2,3,4,5,6], lower: [0,1,2,3,4,5,6] },
+  completedSets: [],          // array of actual set indices already submitted (0–5)
+  allSetsComplete: false,    // true when all 7 sets done — requires click to exit
+  backpack: [],              // special quest items (max 9, no stacking, ordered by acquisition)
+  gameComplete: false,
+  pendingPickupItem: null,    // 待确认的道具 id
+  dialogTimer: null,          // for auto-hide dialog
+};
+
+const rooms = ['A', 'B', 'C'];
+const LOCAL_PREFIX = 'coconut_church_';
+// 音量设置在所有关卡间共用（与 Demo_Level0 同一对键）
+const VOLUME_PREFIX = 'linkgame_';
+
+/* ================================================================
+   CANVAS SCALING — CSS scale to fit window
+   ================================================================ */
+function resizeGame() {
+  const gc = document.getElementById('game-container');
+  // 移动端竖屏时旋转 90° 强制横屏（微信等不跟随设备方向的 webview 也能横屏）
+  const rotated = deviceInfo.isMobileDevice && deviceInfo.isPortrait;
+  let s;
+  if (rotated) {
+    // 旋转后宽高互换：游戏宽 1280 → 视口高，游戏高 720 → 视口宽
+    s = Math.min(window.innerHeight / 1280, window.innerWidth / 720);
+    gc.style.transform = `translate(-50%, -50%) rotate(90deg) scale(${s})`;
+  } else {
+    s = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+    gc.style.transform = `translate(-50%, -50%) scale(${s})`;
+  }
+  gc.classList.toggle('rotated', rotated);
+}
+window.addEventListener('resize', resizeGame);
+resizeGame();
+
+/* ================================================================
+   ③ 方向监听 + 横屏锁屏提示（一次性、可关闭、6 秒自动消失）
+   ================================================================ */
+let landscapeHintDismissed = false;
+let landscapeHintTimer = null;
+
+// 以「实际 viewport 是否横屏」为准，而非按 app 类型判断：
+// 微信/QQ 等不响应旋屏的内置浏览器会一直停在竖屏，isLandscape 恒为 false，自然不触发提示。
+function updateLandscapeHint() {
+  const hint = document.getElementById('landscape-hint');
+  if (!hint) return;
+  const shouldShow = deviceInfo.isMobileDevice && deviceInfo.isLandscape && !landscapeHintDismissed;
+  if (shouldShow && !hint.classList.contains('show')) {
+    hint.classList.add('show');
+    if (landscapeHintTimer) clearTimeout(landscapeHintTimer);
+    landscapeHintTimer = setTimeout(dismissLandscapeHint, 6000);
+  } else if (!shouldShow) {
+    hint.classList.remove('show');
+  }
+}
+
+function dismissLandscapeHint() {
+  landscapeHintDismissed = true;
+  if (landscapeHintTimer) { clearTimeout(landscapeHintTimer); landscapeHintTimer = null; }
+  const hint = document.getElementById('landscape-hint');
+  if (hint) hint.classList.remove('show');
+}
+
+function updateOrientation() {
+  const isPortrait = window.matchMedia
+    ? window.matchMedia('(orientation: portrait)').matches
+    : (window.innerHeight > window.innerWidth);
+
+  deviceInfo.isPortrait = isPortrait;
+  deviceInfo.isLandscape = !isPortrait;
+  const root = document.documentElement;
+  root.classList.toggle('device-portrait', isPortrait);
+  root.classList.toggle('device-landscape', !isPortrait);
+
+  resizeGame(); // 方向变化后重算缩放/旋转
+  updateLandscapeHint();
+}
+window.addEventListener('resize', updateOrientation);
+window.addEventListener('orientationchange', updateOrientation);
+if (window.screen && screen.orientation && screen.orientation.addEventListener) {
+  screen.orientation.addEventListener('change', updateOrientation);
+}
+updateOrientation();
+
+/* ================================================================
+   AUDIO SYSTEM — Web Audio API synth, <audio> fallback
+   ================================================================ */
+let sfxVolume = 0.8;
+let musicVolume = 0.7;
+let audioCtx = null;
+let bgmStarted = false;
+
+function getAudioCtx() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return audioCtx;
+}
+
+/** Play a named sound — tries <audio> element first, falls back to synth */
+function playSound(type) {
+  if (sfxVolume <= 0.01) return;
+  const el = document.getElementById('sfx-' + type);
+  if (el && el.src && el.src !== window.location.href + 'audio/sfx-' + type + '.mp3') {
+    try {
+      el.volume = sfxVolume;
+      el.currentTime = 0;
+      el.play().catch(() => playSynthSound(type));
+      return;
+    } catch(e) { /* fall through */ }
+  }
+  playSynthSound(type);
+}
+
+/** Synthesize sound effects using Web Audio API oscillators */
+function playSynthSound(type) {
+  if (sfxVolume <= 0.01) return;
+  try {
+    const ctx = getAudioCtx();
+    const g = ctx.createGain();
+    g.gain.value = sfxVolume * 0.5;
+    g.connect(ctx.destination);
+    const now = ctx.currentTime;
+
+    switch (type) {
+      case 'collect': {
+        [523.25, 659.25].forEach((freq, i) => {
+          const osc = ctx.createOscillator(); osc.type = 'sine'; osc.frequency.value = freq;
+          const g2 = ctx.createGain();
+          g2.gain.setValueAtTime(0.3, now + i * 0.1);
+          g2.gain.exponentialRampToValueAtTime(0.001, now + i * 0.1 + 0.15);
+          osc.connect(g2); g2.connect(g);
+          osc.start(now + i * 0.1); osc.stop(now + i * 0.1 + 0.15);
+        });
+        break;
+      }
+      case 'drop': {
+        const osc = ctx.createOscillator(); osc.type = 'triangle'; osc.frequency.value = 196;
+        const g2 = ctx.createGain();
+        g2.gain.setValueAtTime(0.5, now);
+        g2.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+        osc.connect(g2); g2.connect(g);
+        osc.start(now); osc.stop(now + 0.25);
+        break;
+      }
+      case 'dialogue': {
+        const osc = ctx.createOscillator(); osc.type = 'sine'; osc.frequency.value = 880;
+        const g2 = ctx.createGain();
+        g2.gain.setValueAtTime(0.15, now);
+        g2.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+        osc.connect(g2); g2.connect(g);
+        osc.start(now); osc.stop(now + 0.06);
+        break;
+      }
+      case 'success': {
+        [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
+          const osc = ctx.createOscillator(); osc.type = 'sine'; osc.frequency.value = freq;
+          const n = now + i * 0.12;
+          const g2 = ctx.createGain();
+          g2.gain.setValueAtTime(0.25, n);
+          g2.gain.exponentialRampToValueAtTime(0.001, n + 0.2);
+          osc.connect(g2); g2.connect(g);
+          osc.start(n); osc.stop(n + 0.2);
+        });
+        break;
+      }
+      case 'error': {
+        const osc = ctx.createOscillator(); osc.type = 'sawtooth'; osc.frequency.value = 261.63;
+        const g2 = ctx.createGain();
+        g2.gain.setValueAtTime(0.2, now);
+        g2.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        osc.connect(g2); g2.connect(g);
+        osc.start(now); osc.stop(now + 0.35);
+        break;
+      }
+      case 'complete': {
+        [523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((freq, i) => {
+          const osc = ctx.createOscillator(); osc.type = 'sine'; osc.frequency.value = freq;
+          const n = now + i * 0.15;
+          const g2 = ctx.createGain();
+          g2.gain.setValueAtTime(0.3, n);
+          g2.gain.exponentialRampToValueAtTime(0.001, n + 0.28);
+          osc.connect(g2); g2.connect(g);
+          osc.start(n); osc.stop(n + 0.28);
+        });
+        break;
+      }
+      case 'click': {
+        const osc = ctx.createOscillator(); osc.type = 'sine'; osc.frequency.value = 1200;
+        const g2 = ctx.createGain();
+        g2.gain.setValueAtTime(0.1, now);
+        g2.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+        osc.connect(g2); g2.connect(g);
+        osc.start(now); osc.stop(now + 0.04);
+        break;
+      }
+      case 'nav': {
+        const bufferSize = ctx.sampleRate * 0.2;
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+        const src = ctx.createBufferSource(); src.buffer = buffer;
+        const filter = ctx.createBiquadFilter(); filter.type = 'bandpass'; filter.frequency.value = 800; filter.Q.value = 0.5;
+        const g2 = ctx.createGain();
+        g2.gain.setValueAtTime(0.15, now);
+        g2.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        src.connect(filter); filter.connect(g2); g2.connect(g);
+        src.start(now); src.stop(now + 0.2);
+        break;
+      }
+      default: {
+        const osc = ctx.createOscillator(); osc.type = 'sine'; osc.frequency.value = 800;
+        const g2 = ctx.createGain();
+        g2.gain.setValueAtTime(0.1, now);
+        g2.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+        osc.connect(g2); g2.connect(g);
+        osc.start(now); osc.stop(now + 0.05);
+      }
+    }
+  } catch(e) { /* AudioContext may not be available — fail silently */ }
+}
+
+/* ================================================================
+   BGM — ambient drone loop
+   ================================================================ */
+let bgmOscs = [];
+function startBgm() {
+  if (bgmStarted || musicVolume <= 0.01) return;
+  bgmStarted = true;
+  const bgmEl = document.getElementById('bgm');
+  if (bgmEl) {
+    bgmEl.volume = musicVolume * 0.4;
+    bgmEl.play().catch(() => {});
+  }
+  synthBgm();
+}
+
+function synthBgm() {
+  try {
+    const ctx = getAudioCtx();
+    const freqs = [73.42, 110, 146.83];
+    freqs.forEach((freq, i) => {
+      const osc = ctx.createOscillator(); osc.type = 'sine'; osc.frequency.value = freq;
+      const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.1 + i * 0.07;
+      const lfoGain = ctx.createGain(); lfoGain.gain.value = 2;
+      lfo.connect(lfoGain); lfoGain.connect(osc.frequency);
+      lfo.start();
+      const g = ctx.createGain();
+      g.gain.value = musicVolume * 0.04 * (1 - i * 0.2);
+      osc.connect(g); g.connect(ctx.destination);
+      osc.start();
+      bgmOscs.push(osc);
+    });
+  } catch(e) { /* ignore */ }
+}
+
+function stopBgm() {
+  bgmOscs.forEach(o => { try { o.stop(); } catch(e) {} });
+  bgmOscs = [];
+  const bgmEl = document.getElementById('bgm');
+  if (bgmEl) { bgmEl.pause(); bgmEl.currentTime = 0; }
+  bgmStarted = false;
+}
+
+/* ================================================================
+   INVENTORY SYSTEM
+   ================================================================ */
+function addItem(id) {
+  const existing = state.inventory.find(e => e.id === id);
+  if (existing) {
+    existing.count++;
+  } else {
+    state.inventory.push({ id, count: 1 });
+  }
+  renderInventory();
+}
+
+function removeItem(id, count = 1) {
+  const idx = state.inventory.findIndex(e => e.id === id);
+  if (idx === -1) return;
+  state.inventory[idx].count -= count;
+  if (state.inventory[idx].count <= 0) {
+    state.inventory.splice(idx, 1);
+  }
+  renderInventory();
+}
+
+function getCount(id) {
+  const entry = state.inventory.find(e => e.id === id);
+  return entry ? entry.count : 0;
+}
+
+/** Full rebuild of inventory DOM — one slot per item type, badge for count > 1 */
+function renderInventory() {
+  const container = document.getElementById('ui-inventory');
+  const slots = container.querySelectorAll('.inv-slot');
+  slots.forEach(s => s.remove());
+
+  state.inventory.forEach(entry => {
+    const slot = document.createElement('div');
+    slot.className = 'inv-slot';
+
+    const item = document.createElement('div');
+    item.className = 'inv-item';
+    item.style.backgroundImage = `url('images/item-${entry.id}.png')`;
+    item.setAttribute('data-item-id', entry.id);
+    item.onmousedown = startManualDrag;       // 手动拖拽入口（非 HTML5 原生 Drag API）
+    // Mobile touch-drag support
+    item.addEventListener('touchstart', touchStart, { passive: false });
+    item.addEventListener('touchmove', touchMove, { passive: false });
+    item.addEventListener('touchend', touchEnd);
+
+    slot.appendChild(item);
+
+    // Count badge for stacked items
+    if (entry.count > 1) {
+      const badge = document.createElement('span');
+      badge.className = 'inv-count';
+      badge.textContent = 'x' + entry.count;
+      slot.appendChild(badge);
+    }
+
+    container.appendChild(slot);
+  });
+}
+
+/* ================================================================
+   DRAG & DROP — 手动拖拽系统（非 HTML5 原生 Drag API）
+   ================================================================ */
+
+// --- 手动拖拽引擎 ---
+let dragCursorFollower = null;
+let dragState = null;
+
+function ensureCursorFollower() {
+    if (!dragCursorFollower) {
+        dragCursorFollower = document.createElement('div');
+        dragCursorFollower.id = 'drag-cursor-follower';
+        dragCursorFollower.style.backgroundImage = "url('images/cursor-grabbing.png')";
+        document.body.appendChild(dragCursorFollower);
+    }
+}
+
+function updateFollowerCursor(overDropTarget) {
+    if (!dragCursorFollower) return;
+    // 拖拽过程中始终显示抓取光标，不因悬停目标而改变
+    dragCursorFollower.style.backgroundImage = "url('images/cursor-grabbing.png')";
+}
+
+function removeCursorFollower() {
+    if (dragCursorFollower) {
+        dragCursorFollower.remove();
+        dragCursorFollower = null;
+    }
+}
+
+function cleanupDrag() {
+    if (dragState && dragState.clone) {
+        dragState.clone.remove();
+    }
+    dragState = null;
+    document.body.classList.remove('dragging');
+    removeCursorFollower();
+    document.querySelectorAll('.drag-over-target').forEach(el =>
+        el.classList.remove('drag-over-target')
+    );
+}
+
+/** 物品 mousedown — 开始拖拽 */
+function startManualDrag(e) {
+    if (e.button !== 0) return;          // 仅左键
+    e.preventDefault();
+
+    const itemEl = e.currentTarget;
+    const itemId = itemEl.getAttribute('data-item-id');
+
+    // 创建物品跟随克隆
+    const clone = document.createElement('div');
+    clone.style.cssText = `
+        position: fixed; pointer-events: none; z-index: 99998;
+        width: ${itemEl.offsetWidth}px; height: ${itemEl.offsetHeight}px;
+        background-image: ${itemEl.style.backgroundImage};
+        background-size: contain; background-repeat: no-repeat;
+        background-position: center;
+        opacity: 0.85; display: none;
+        transform: translate(-50%, -50%);
+    `;
+    document.body.appendChild(clone);
+
+    dragState = {
+        itemId: itemId,
+        sourceEl: itemEl,
+        startX: e.clientX,
+        startY: e.clientY,
+        started: false,
+        clone: clone
+    };
+}
+
+// 全局 mousemove — 追踪拖拽
+document.addEventListener('mousemove', function(e) {
+    if (!dragState) return;
+
+    const dx = e.clientX - dragState.startX;
+    const dy = e.clientY - dragState.startY;
+
+    // 4px 阈值：区分点击与拖拽
+    if (!dragState.started) {
+        if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+        dragState.started = true;
+        document.body.classList.add('dragging');
+        ensureCursorFollower();
+        dragState.clone.style.display = 'block';
+    }
+
+    // 更新物品克隆位置
+    dragState.clone.style.left = e.clientX + 'px';
+    dragState.clone.style.top = e.clientY + 'px';
+
+    // 更新光标跟随器位置
+    if (dragCursorFollower) {
+        dragCursorFollower.style.left = e.clientX + 'px';
+        dragCursorFollower.style.top = e.clientY + 'px';
+    }
+
+    // 检测鼠标下方放置目标
+    const elUnder = document.elementFromPoint(e.clientX, e.clientY);
+    const dropTarget = elUnder && elUnder.closest &&
+        elUnder.closest('[data-drop-target]');
+
+    // 更新高亮
+    document.querySelectorAll('.drag-over-target').forEach(el => {
+        if (el !== dropTarget) el.classList.remove('drag-over-target');
+    });
+    if (dropTarget && !dropTarget.classList.contains('drag-over-target')) {
+        dropTarget.classList.add('drag-over-target');
+    }
+
+    updateFollowerCursor(!!dropTarget);
+});
+
+// 全局 mouseup — 结束拖拽
+document.addEventListener('mouseup', function(e) {
+    if (!dragState) return;
+
+    if (dragState.started) {
+        const elUnder = document.elementFromPoint(e.clientX, e.clientY);
+        const dropTarget = elUnder && elUnder.closest &&
+            elUnder.closest('[data-drop-target]');
+
+        if (dropTarget) {
+            const targetId = dropTarget.dataset.dropTarget;
+            if (targetId) {
+                handleDrop(dragState.itemId, targetId, dropTarget);
+            }
+        }
+    }
+
+    cleanupDrag();
+});
+
+// 鼠标离开游戏容器时取消
+document.getElementById('game-container').addEventListener('mouseleave', function() {
+    if (dragState) cleanupDrag();
+});
+
+/** Core drop routing — one drag offers all coconuts at once */
+function handleDrop(itemId, targetId, targetEl) {
+  if (itemId === 'coconut' && targetId === 'statue') {
+    if (state.coconutsOffered >= 3) {
+      showDialog('雕像前的椰子已经够多了……');
+      return;
+    }
+    const count = getCount('coconut');
+    if (count <= 0) return;
+    // All-or-nothing: must have all 3 to offer
+    if (count < 3) {
+      showDialog('三椰一体，不可析分');
+      playSound('error');
+      return;
+    }
+    // Offer all 3 at once
+    removeItem('coconut', 3);
+    state.coconutsOffered = 3;
+    playSound('drop');
+
+    document.getElementById('entity-statue').classList.add('offered');
+    setTimeout(() => {
+      showDialog('雕像微微发光……似乎可以对话了。');
+    }, 400);
+  }
+}
+
+/* ================================================================
+   INVENTORY DRAG-SCROLLING — per spec §15
+   ================================================================ */
+let isDraggingInventory = false;
+let invScrollStartY = 0;
+let invScrollTop = 0;
+
+(function initInventoryScroll() {
+  const inv = document.getElementById('ui-inventory');
+  if (!inv) return;
+
+  inv.addEventListener('mousedown', function(ev) {
+    // Only scroll-drag when NOT clicking on an inventory item
+    if (ev.target.classList.contains('inv-item')) return;
+    isDraggingInventory = true;
+    invScrollStartY = ev.clientY;
+    invScrollTop = inv.scrollTop;
+    inv.style.cursor = 'url(images/cursor-grabbing.png) 16 16, grabbing';
+    ev.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function(ev) {
+    if (!isDraggingInventory) return;
+    const dy = ev.clientY - invScrollStartY;
+    inv.scrollTop = invScrollTop - dy * 1.5;
+  });
+
+  document.addEventListener('mouseup', stopInventoryScroll);
+  inv.addEventListener('mouseleave', stopInventoryScroll);
+
+  function stopInventoryScroll() {
+    if (!isDraggingInventory) return;
+    isDraggingInventory = false;
+    inv.style.cursor = '';
+  }
+})();
+
+/* ================================================================
+   MOBILE TOUCH-DRAG — enables drag-drop on touch devices
+   ================================================================ */
+let touchDragItem = null;
+let touchGhost = null;
+
+function touchStart(ev) {
+  if (ev.target.classList.contains('inv-item')) {
+    ev.preventDefault();
+    touchDragItem = ev.target.getAttribute('data-item-id');
+    const touch = ev.touches[0];
+    touchGhost = ev.target.cloneNode(true);
+    touchGhost.style.position = 'fixed';
+    touchGhost.style.width = '80px'; touchGhost.style.height = '80px';
+    touchGhost.style.opacity = '0.8'; touchGhost.style.pointerEvents = 'none';
+    touchGhost.style.zIndex = '9999';
+    touchGhost.style.left = (touch.clientX - 40) + 'px';
+    touchGhost.style.top = (touch.clientY - 40) + 'px';
+    touchGhost.style.transform = 'scale(1.1)';
+    document.body.appendChild(touchGhost);
+  }
+}
+
+function touchMove(ev) {
+  if (!touchGhost) return;
+  ev.preventDefault();
+  const touch = ev.touches[0];
+  touchGhost.style.left = (touch.clientX - 40) + 'px';
+  touchGhost.style.top = (touch.clientY - 40) + 'px';
+  const elUnder = document.elementFromPoint(touch.clientX, touch.clientY);
+  document.getElementById('entity-statue').classList.remove('drop-highlight');
+  if (elUnder && elUnder.id === 'entity-statue') {
+    elUnder.classList.add('drop-highlight');
+  }
+}
+
+function touchEnd(ev) {
+  document.getElementById('entity-statue').classList.remove('drop-highlight');
+  if (!touchGhost || !touchDragItem) return;
+  const touch = ev.changedTouches[0];
+  const elUnder = document.elementFromPoint(touch.clientX, touch.clientY);
+  if (elUnder && elUnder.id === 'entity-statue') {
+    handleDrop(touchDragItem, 'statue', elUnder);
+  }
+  if (touchGhost.parentNode) touchGhost.parentNode.removeChild(touchGhost);
+  touchGhost = null; touchDragItem = null;
+}
+
+/* ================================================================
+   ROOM NAVIGATION
+   ================================================================ */
+function changeRoom(dir) {
+  if (state.dialogTimer) { clearTimeout(state.dialogTimer); hideDialog(); }
+
+  const newIndex = state.currentRoomIndex + dir;
+  if (newIndex < 0 || newIndex >= rooms.length) return;
+  if (newIndex === 1 && !state.roomANavUnlocked) return;
+  if (newIndex === 2) return;
+  if (state.currentRoomIndex === 2) return;
+
+  const oldRoom = document.getElementById('room-' + rooms[state.currentRoomIndex]);
+  oldRoom.classList.remove('active-room');
+
+  state.currentRoomIndex = newIndex;
+  const newRoom = document.getElementById('room-' + rooms[state.currentRoomIndex]);
+  newRoom.classList.add('active-room');
+
+  playSound('nav');
+  updateNavVisibility();
+}
+
+/** Enter room C (dress-up) — called from nun-5 interaction */
+function enterRoomC() {
+  if (state.dialogTimer) { clearTimeout(state.dialogTimer); }
+  hideDialog();
+
+  const oldRoom = document.getElementById('room-' + rooms[state.currentRoomIndex]);
+  oldRoom.classList.remove('active-room');
+
+  state.currentRoomIndex = 2;
+  document.getElementById('room-C').classList.add('active-room');
+
+  // Reset dress-up state with shuffled permutations
+  state.dressPermutations = {
+    head:  shuffleArray([0, 1, 2, 3, 4, 5, 6]),
+    upper: shuffleArray([0, 1, 2, 3, 4, 5, 6]),
+    lower: shuffleArray([0, 1, 2, 3, 4, 5, 6]),
+  };
+  // Initial positions set to mismatch: 0, 2, 4 ensure no same set initially
+  state.dressHeadPos = 0;
+  state.dressUpperPos = 2;
+  state.dressLowerPos = 4;
+  // Verify mismatch — if any actual sets collide (very unlikely), adjust
+  if (getActualSet('head') === getActualSet('upper')) state.dressUpperPos = 3;
+  if (getActualSet('head') === getActualSet('lower')) state.dressLowerPos = 5;
+  if (getActualSet('upper') === getActualSet('lower')) state.dressLowerPos = 6;
+  state.completedSets = [];
+  state.allSetsComplete = false;
+  const btn = document.getElementById('dress-submit');
+  btn.classList.remove('complete-all');
+  btn.textContent = '搭 配 好 啦';
+  updateDressDisplay();
+  updateCoconutIndicators();
+
+  updateNavVisibility();
+}
+
+/** Return from room C to room B after completing all sets */
+function exitRoomC() {
+  if (state.dialogTimer) { clearTimeout(state.dialogTimer); }
+  hideDialog();
+
+  document.getElementById('room-C').classList.remove('active-room');
+
+  state.currentRoomIndex = 1;
+  document.getElementById('room-B').classList.add('active-room');
+
+  state.nun5FirstTalk = true;
+  updateNunLock();
+  // Show nun-5 again so player can re-trigger dialog if needed
+  document.getElementById('entity-nun-5').style.display = '';
+  // Portrait 保持显示（可点击作为备用）；主流程改为点击对话框消失后自动弹出通关道具窗口
+  const nunFull = document.getElementById('entity-nun-full');
+  nunFull.classList.add('visible');
+  nunFull.classList.add('clickable');
+  nunFull.setAttribute('data-clickable', 'portrait');
+
+  updateNavVisibility();
+
+  // 对话框不自动消失：点击对话框消失后（onDialogClick）自动弹出通关道具窗口
+  showDialog('行吧，谢谢啦，拍立得还给你，这里真的太出片了。', 5000);
+}
+
+/** Show/hide navigation arrows based on state */
+function updateNavVisibility() {
+  const navLeft = document.getElementById('nav-left');
+  const navRight = document.getElementById('nav-right');
+
+  if (state.currentRoomIndex === 0) {
+    navLeft.classList.remove('visible');
+    if (state.roomANavUnlocked) {
+      navRight.classList.add('visible');
+    } else {
+      navRight.classList.remove('visible');
+    }
+  } else if (state.currentRoomIndex === 1) {
+    navLeft.classList.add('visible');
+    navRight.classList.remove('visible');
+  } else {
+    navLeft.classList.remove('visible');
+    navRight.classList.remove('visible');
+  }
+}
+
+/* ================================================================
+   DIALOGUE SYSTEM
+   ================================================================ */
+function showDialog(text, autoHideMs) {
+  if (state.dialogTimer) { clearTimeout(state.dialogTimer); state.dialogTimer = null; }
+  const box = document.getElementById('dialog-box');
+  box.textContent = text;
+  box.classList.add('visible');
+  playSound('dialogue');
+
+  // 统一：对话框不自动消失，点击对话框范围区域后才关闭；显示期间锁定游戏界面
+  document.getElementById('dialog-lock').classList.add('show');
+}
+
+/** Click handler for dialog box — 统一：点击对话框本身即关闭（portrait 保留由 hideDialog 处理） */
+function onDialogClick() {
+  hideDialog();
+  // 换装通关返回 roomB 后，与修女对话完，对话框点击消失后自动弹出通关道具窗口
+  if (state.nun5FirstTalk && !state.nun5Complete) {
+    completeNun5Polaroid();
+  }
+}
+
+/** 收回拍立得（通关道具）——对话框点击消失后自动触发 */
+function completeNun5Polaroid() {
+  if (!state.nun5FirstTalk || state.nun5Complete) return;
+  state.nun5Complete = true;
+  if (state.dialogTimer) { clearTimeout(state.dialogTimer); state.dialogTimer = null; }
+  document.getElementById('dialog-box').classList.remove('visible');
+  document.getElementById('dialog-box').textContent = '';
+  document.getElementById('dialog-lock').classList.remove('show');
+  const nunFull = document.getElementById('entity-nun-full');
+  nunFull.classList.remove('visible');
+  nunFull.classList.remove('clickable');
+  nunFull.removeAttribute('data-clickable');
+  document.getElementById('entity-nun-5').style.display = 'none';
+  playSound('collect');
+  showPickupModal('polaroid', '拍立得');
+}
+
+function hideDialog() {
+  if (state.dialogTimer) { clearTimeout(state.dialogTimer); state.dialogTimer = null; }
+  const box = document.getElementById('dialog-box');
+  box.classList.remove('visible');
+  box.textContent = '';
+  // Only hide portrait if NOT in a clickable-portrait state
+  if (!(state.nun5DialogShown && !state.nun5FirstTalk) && !(state.nun5FirstTalk && !state.nun5Complete)) {
+    document.getElementById('entity-nun-full').classList.remove('visible');
+    document.getElementById('entity-nun-full').classList.remove('clickable');
+  }
+  document.querySelectorAll('.speech-bubble').forEach(function(b) { b.classList.remove('show'); });
+  document.getElementById('dialog-lock').classList.remove('show');
+}
+
+/* ================================================================
+   INTERACTION — NPC clicks
+   ================================================================ */
+function interact(targetId) {
+  if (targetId === 'statue') interactStatue();
+}
+
+function interactStatue() {
+  if (state.statueTalked) {
+    showDialog('注意不要携带椰子。');
+    return;
+  }
+  if (state.coconutsOffered < 3) {
+    if (state.coconutsCollected > 0) {
+      showDialog('（雕像静静伫立……也许需要献上更多椰子？）');
+    } else {
+      showDialog('（一座威严的椰神雕像……周围散落着几颗椰子。）');
+    }
+    return;
+  }
+
+  // All coconuts offered — main dialogue
+  showDialog('为何如此喧嚣？你可否进去一看。注意不要携带椰子。');
+  state.statueTalked = true;
+  state.roomANavUnlocked = true;
+  updateNavVisibility();
+
+  // Prompt the player with nav hint
+  setTimeout(() => {
+    document.getElementById('nav-right').style.animation = 'navHint 1s ease-in-out 3';
+    setTimeout(() => {
+      document.getElementById('nav-right').style.animation = '';
+    }, 3000);
+  }, 3800);
+}
+
+/** 修女1–4 是否处于「可看不可点」状态：修女5立绘对话期间（尚未去过 roomC）。
+    与 interactNun 里那句 return 的条件保持一致，避免指针和实际可点性脱节。 */
+function updateNunLock() {
+  const locked = !!(state.nun5DialogShown && !state.nun5FirstTalk);
+  for (let i = 1; i <= 4; i++) {
+    document.getElementById('entity-nun-' + i).classList.toggle('locked', locked);
+  }
+}
+
+/** Nun interactions in Room B */
+function interactNun(index) {
+  if (index >= 1 && index <= 4) {
+    // Block interaction with other nuns while nun5 dialog/portrait is active (before Room C)
+    if (state.nun5DialogShown && !state.nun5FirstTalk) return;
+
+    // Instantly clear all previous UI: dialog, portrait, other bubbles
+    if (state.dialogTimer) { clearTimeout(state.dialogTimer); state.dialogTimer = null; }
+    document.getElementById('dialog-box').classList.remove('visible');
+    document.getElementById('entity-nun-full').classList.remove('visible');
+    document.querySelectorAll('.speech-bubble').forEach(function(b) { b.classList.remove('show'); });
+
+    const bubble = document.getElementById('bubble-nun-' + index);
+    if (bubble) {
+      bubble.classList.add('show');
+      playSound('dialogue');
+      state.dialogTimer = setTimeout(function() {
+        bubble.classList.remove('show');
+        state.dialogTimer = null;
+      }, 2000);
+    }
+    return;
+  }
+  if (index === 5) {
+    // Clear speech bubbles before showing nun-5 dialog
+    document.querySelectorAll('.speech-bubble').forEach(b => b.classList.remove('show'));
+    interactNun5();
+  }
+}
+
+/** Nun 5 — the tourist with the polaroid */
+function interactNun5() {
+  if (state.nun5Complete) {
+    return; // NPC5 hidden after giving polaroid back
+  }
+
+  if (state.nun5FirstTalk) {
+    // After Room C — show dialog with 5s timer; clicking won't dismiss;
+    // dialog stays until portrait click gives polaroid
+    showDialog('行吧，谢谢啦，拍立得还给你，这里真的太出片了。', 5000);
+    return;
+  }
+
+  if (state.nun5DialogShown) {
+    // Already showing portrait — ignore further NPC5 clicks, wait for portrait click
+    return;
+  }
+
+  // First click — show dialogue + portrait, nun-5 disappears, dialog does NOT auto-hide
+  showDialog('借我玩一下嘛，我要出片，快帮我拍照。', 0);
+  const nunFull = document.getElementById('entity-nun-full');
+  nunFull.classList.add('visible');
+  nunFull.classList.add('clickable');
+  nunFull.setAttribute('data-clickable', 'portrait');
+  document.getElementById('entity-nun-5').style.display = 'none';
+  state.nun5DialogShown = true;
+  updateNunLock();
+}
+
+/** Center NPC interaction — Room B church rules */
+function interactCenterNpc() {
+  if (state.dialogTimer) { clearTimeout(state.dialogTimer); }
+  document.querySelectorAll('.speech-bubble').forEach(b => b.classList.remove('show'));
+  showDialog('不许翘脚，不许玩手机，不许大声喧哗，不许吃东西，不许打扰别人……但请疯狂拍照。');
+}
+
+/** Click on the full nun portrait — enters Room C or receives polaroid */
+function clickNunPortrait() {
+  // First click: enter Room C for dress-up
+  if (state.nun5DialogShown && !state.nun5FirstTalk) {
+    const nunFull = document.getElementById('entity-nun-full');
+    nunFull.classList.remove('visible');
+    nunFull.classList.remove('clickable');
+    nunFull.removeAttribute('data-clickable');
+    enterRoomC();
+    return;
+  }
+  // After Room C: portrait click also completes — same as dialog click path
+  completeNun5Polaroid();
+}
+
+/* ================================================================
+   COCONUT COLLECTION (Room A)
+   ================================================================ */
+function collectCoconut(index) {
+  const entity = document.getElementById('entity-coconut-' + index);
+  if (entity.classList.contains('collected')) return;
+
+  entity.classList.add('collected');
+  state.coconutsCollected++;
+  addItem('coconut');
+  playSound('collect');
+}
+
+/* ================================================================
+   ROOM C — DRESS-UP MINIGAME (no set names, all parts square)
+   ================================================================ */
+
+/** Fisher-Yates shuffle */
+function shuffleArray(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/** Get actual set index for a dress part via its permutation */
+function getActualSet(part) {
+  const perm = state.dressPermutations[part];
+  const pos = part === 'head' ? state.dressHeadPos
+           : part === 'upper' ? state.dressUpperPos
+           : state.dressLowerPos;
+  return perm[pos];
+}
+
+/** Cycle a dress part by delta (-1 or +1) through permutation */
+function cycleDressPart(part, delta) {
+  playSound('click');
+  const size = 7;
+  switch (part) {
+    case 'head':  state.dressHeadPos  = (state.dressHeadPos  + delta + size) % size; break;
+    case 'upper': state.dressUpperPos = (state.dressUpperPos + delta + size) % size; break;
+    case 'lower': state.dressLowerPos = (state.dressLowerPos + delta + size) % size; break;
+  }
+  updateDressDisplay();
+}
+
+/** Update dress part images using actual set index from permutation */
+function updateDressDisplay() {
+  const headEl  = document.getElementById('dress-head');
+  const upperEl = document.getElementById('dress-upper');
+  const lowerEl = document.getElementById('dress-lower');
+
+  const hSet = getActualSet('head') + 1;
+  const uSet = getActualSet('upper') + 1;
+  const lSet = getActualSet('lower') + 1;
+
+  headEl.style.backgroundImage  = `url('images/dress-head-${hSet}.png')`;
+  upperEl.style.backgroundImage = `url('images/dress-upper-${uSet}.png')`;
+  lowerEl.style.backgroundImage = `url('images/dress-lower-${lSet}.png')`;
+}
+
+/** Update coconut indicators lit state — 7 sets */
+function updateCoconutIndicators() {
+  for (let i = 0; i < 7; i++) {
+    const el = document.getElementById('coco-' + i);
+    if (el) {
+      if (state.completedSets.includes(i)) {
+        el.classList.add('lit');
+      } else {
+        el.classList.remove('lit');
+      }
+    }
+  }
+}
+
+/** Submit current outfit combination — uses actual set indices */
+function submitOutfit() {
+  // If all sets complete, clicking the button exits Room C
+  if (state.allSetsComplete) {
+    exitRoomC();
+    return;
+  }
+
+  const hi = getActualSet('head');
+  const ui = getActualSet('upper');
+  const li = getActualSet('lower');
+
+  if (hi === ui && ui === li) {
+    if (state.completedSets.includes(hi)) {
+      showDialog('这套已经搭配过了哦~');
+      playSound('click');
+    } else {
+      state.completedSets.push(hi);
+      updateCoconutIndicators();
+      playSound('success');
+      if (hi === 6) {
+        showDialog('大王叫我来巡山！');
+      } else {
+        showDialog('仙品，来拍一张吧');
+      }
+
+      if (state.completedSets.length >= 7) {
+        const btn = document.getElementById('dress-submit');
+        btn.classList.add('complete-all');
+        btn.textContent = '全 部 完 成';
+        state.allSetsComplete = true;
+        playSound('complete');
+      }
+    }
+  } else {
+    showDialog('厕品，重来！');
+    playSound('error');
+    const model = document.getElementById('dress-model');
+    model.style.animation = 'none';
+    model.offsetHeight;
+    model.style.animation = 'shake 0.4s ease-out';
+    setTimeout(() => { model.style.animation = ''; }, 400);
+  }
+}
+
+/* ================================================================
+   COMPLETION
+   ================================================================ */
+/* ================================================================
+   PICKUP MODAL — 道具拾取弹窗（严格模态）
+   ================================================================ */
+function showPickupModal(itemId, itemName) {
+  state.pendingPickupItem = itemId;
+  const overlay = document.getElementById('pickup-overlay');
+  document.getElementById('pickup-item-img').style.backgroundImage = `url('images/item-${itemId}.png')`;
+  document.getElementById('pickup-item-name').textContent = itemName;
+  overlay.classList.add('visible');
+}
+
+function confirmPickup() {
+  document.getElementById('pickup-overlay').classList.remove('visible');
+  if (state.pendingPickupItem) {
+    addBackpackItem(state.pendingPickupItem);
+    state.pendingPickupItem = null;
+  }
+}
+
+/* ================================================================
+   BACKPACK — 3×3 grid for special quest items
+   ================================================================ */
+// ---- 返回 Level0（获得通关道具后，左上角出现返回按钮） ----
+const RETURN_LEVEL_NUM = 7;
+const RETURN_ITEM_ID = 'polaroid';
+
+function updateReturnBtn() {
+  const btn = document.getElementById('return-btn');
+  if (!btn) return;
+  let has = false;
+  try { const s = JSON.parse(localStorage.getItem('linkgame_backpack') || '[]'); has = s.indexOf(RETURN_ITEM_ID) !== -1; } catch (e) {}
+  btn.style.display = has ? 'flex' : 'none';
+}
+
+function returnToLevel0() {
+  try { localStorage.setItem('linkgame_pendingReturn', String(RETURN_LEVEL_NUM)); } catch (e) {}
+  window.location.href = '../Demo_Level0/index.html';
+}
+
+window.addEventListener('DOMContentLoaded', updateReturnBtn);
+
+function addBackpackItem(id) {
+  if (state.backpack.length >= 9) return;
+  state.backpack.push(id);
+  // 跨关卡同步：把本关道具合并进共享背包键（Demo_Level0 通关检测用）
+  try {
+    const shared = JSON.parse(localStorage.getItem('linkgame_backpack') || '[]');
+    state.backpack.forEach(pid => { if (shared.indexOf(pid) === -1) shared.push(pid); });
+    localStorage.setItem('linkgame_backpack', JSON.stringify(shared));
+  } catch (e) {}
+  updateReturnBtn();
+  renderBackpack();
+  // 获得本关通关物品 → 对话框提示返回地铁站
+  if (id === RETURN_ITEM_ID) showDialog('点击左上角返回地铁站吧！');
+}
+
+function renderBackpack() {
+  const grid = document.getElementById('backpack-grid');
+  const slots = grid.querySelectorAll('.bp-slot');
+  slots.forEach(s => { s.innerHTML = ''; s.classList.remove('filled'); });
+  state.backpack.forEach((id, i) => {
+    if (i >= slots.length) return;
+    const item = document.createElement('div');
+    item.className = 'bp-item';
+    item.style.backgroundImage = `url('images/item-${id}.png')`;
+    slots[i].appendChild(item);
+    slots[i].classList.add('filled');
+  });
+}
+
+function toggleBackpack() {
+  document.getElementById('backpack-overlay').classList.toggle('show');
+  if (document.getElementById('backpack-overlay').classList.contains('show')) {
+    // Close settings if open
+    document.getElementById('settings-overlay').classList.remove('show');
+  }
+  playSound('click');
+}
+
+/* ================================================================
+   SETTINGS
+   ================================================================ */
+function toggleSettings() {
+  document.getElementById('settings-overlay').classList.toggle('show');
+  if (document.getElementById('settings-overlay').classList.contains('show')) {
+    document.getElementById('backpack-overlay').classList.remove('show');
+  }
+  playSound('click');
+}
+
+function onMusicVolume(value) {
+  musicVolume = parseInt(value) / 100;
+  document.getElementById('vol-music-label').textContent = value;
+  localStorage.setItem(VOLUME_PREFIX + 'music_vol', value);
+  const bgmEl = document.getElementById('bgm');
+  if (bgmEl) bgmEl.volume = musicVolume * 0.4;
+  if (musicVolume > 0.01 && !bgmStarted) {
+    startBgm();
+  } else if (musicVolume <= 0.01 && bgmStarted) {
+    stopBgm();
+  }
+}
+
+function onSfxVolume(value) {
+  sfxVolume = parseInt(value) / 100;
+  document.getElementById('vol-sfx-label').textContent = value;
+  localStorage.setItem(VOLUME_PREFIX + 'sfx_vol', value);
+}
+
+function openExternalLink() {
+  playSound('click');
+  window.open('https://link-project.super.site/', '_blank');
+}
+
+function loadSettings() {
+  const mv = localStorage.getItem(VOLUME_PREFIX + 'music_vol');
+  const sv = localStorage.getItem(VOLUME_PREFIX + 'sfx_vol');
+  if (mv !== null) {
+    musicVolume = parseInt(mv) / 100;
+    document.getElementById('vol-music').value = mv;
+    document.getElementById('vol-music-label').textContent = mv;
+  }
+  if (sv !== null) {
+    sfxVolume = parseInt(sv) / 100;
+    document.getElementById('vol-sfx').value = sv;
+    document.getElementById('vol-sfx-label').textContent = sv;
+  }
+}
+
+/* ================================================================
+   INITIALIZATION
+   ================================================================ */
+function initGame() {
+  loadSettings();
+  updateNavVisibility();
+  renderInventory();
+  // 统一：对话框不自动消失，点击对话框范围区域后才关闭（dialog-box 自带 onclick=onDialogClick()）
+  // 显示期间锁定游戏界面
+
+  const startBgmOnInteract = () => {
+    if (musicVolume > 0.01) startBgm();
+    document.removeEventListener('click', startBgmOnInteract);
+    document.removeEventListener('keydown', startBgmOnInteract);
+  };
+  document.addEventListener('click', startBgmOnInteract);
+  document.addEventListener('keydown', startBgmOnInteract);
+
+  updateDressDisplay();
+  updateCoconutIndicators();
+
+  console.log('🥥 椰树大教堂 — Coconut Church');
+  console.log('📋 收集三个椰子 → 拖到雕像前 → 对话 → 进入教堂 → 找到游客 → 换装 → 回收拍立得');
+
+  // 横屏提示事件绑定（放在初始化函数末尾）
+  document.getElementById('landscape-hint').addEventListener('click', function (e) { if (e.target === e.currentTarget) dismissLandscapeHint(); });
+  document.getElementById('landscape-hint-close').addEventListener('click', dismissLandscapeHint);
+}
+
+// Dynamic CSS animations
+const shakeStyle = document.createElement('style');
+shakeStyle.textContent = `
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-8px); }
+    40% { transform: translateX(8px); }
+    60% { transform: translateX(-6px); }
+    80% { transform: translateX(6px); }
+  }
+  @keyframes navHint {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; transform: scale(1.15); }
+  }
+`;
+document.head.appendChild(shakeStyle);
+
+window.addEventListener('DOMContentLoaded', initGame);
+</script>
+
+</body>
+</html>
