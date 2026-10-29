@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>林克游戏</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #0a0a0a; overflow: hidden;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  width: 100vw; height: 100vh;
+  user-select: none; -webkit-user-select: none;
+}
+#game-container {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%); transform-origin: center center;
+  width: 1280px; height: 720px;
+  background: #222; overflow: hidden;
+  box-shadow: 0 0 20px rgba(0,0,0,0.8);
+  cursor: url('images/cursor-default.png') 2 2, auto;
+}
+
+/* ==== 标题页 room0 ==== */
+#title-screen {
+  position: absolute; top: 0; left: 0; width: 1280px; height: 720px;
+  background: url('images/title-bg.png') center/cover no-repeat;
+  z-index: 500;
+  display: none; flex-direction: column; align-items: center; justify-content: center;
+}
+#title-screen.show { display: flex; }
+#title-bar {
+  width: 700px; height: 160px; margin-bottom: 80px;
+  background: url('images/title-bar.png') center/contain no-repeat;
+}
+.title-btn {
+  width: 280px; height: 90px; margin: 18px 0;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+}
+#btn-start { background-image: url('images/btn-start.png'); }
+/* 「查看存档」按钮：实体区域先用 images/btn-saves.png 占位（1039×334，与另两张按钮图同尺寸），
+   美术出图后整张替换即可，不需要改代码 */
+#btn-saves {
+  background-image: url('images/btn-saves.png');
+}
+
+/* ==== 存档窗口（查看存档；相册式排列）==== */
+#saves-overlay {
+  position: absolute; top: 0; left: 0;
+  width: 1280px; height: 720px;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  z-index: 550; display: none;
+  align-items: center; justify-content: center;
+}
+#saves-overlay.show { display: flex; }
+#saves-panel {
+  position: relative; width: 560px;
+  background: rgba(20, 20, 30, 0.92);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  padding: 26px 32px 24px;
+  color: #e0e0e0;
+  pointer-events: auto; box-sizing: border-box;
+}
+#saves-panel h3 { text-align: center; margin-bottom: 18px; font-size: 22px; font-weight: 500; letter-spacing: 2px; color: #fff; }
+#saves-close-btn {
+  position: absolute; top: 10px; right: 16px;
+  width: 32px; height: 32px;
+  background: none; border: none;
+  color: #999; font-size: 24px;
+  line-height: 32px; text-align: center; padding: 0;
+  transition: color 0.2s; cursor: url('images/cursor-default.png') 2 2, auto;
+}
+#saves-close-btn:hover { color: #fff; }
+#saves-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.save-card {
+  padding: 10px 10px 12px;
+  background: rgba(0,0,0,0.35); border: 2px solid rgba(255,255,255,0.15);
+  border-radius: 10px; box-sizing: border-box;
+  transition: border-color 0.18s, background 0.18s;
+  cursor: url('../Demo_Level0/images/cursor-grab.png') 16 16, pointer;
+}
+.save-card:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.35); }
+.save-card.selected { border-color: #c0a0ff; background: rgba(140,110,220,0.16); box-shadow: 0 0 12px rgba(160,120,255,0.35); }
+.save-card-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 9px; font-size: 12px; color: #bbb; }
+.save-card-idx { color: #fff; font-size: 13px; letter-spacing: 1px; }
+.save-card-dots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.save-dot {
+  aspect-ratio: 1; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; line-height: 1;
+  background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.18);
+  color: rgba(255,255,255,0.35);
+}
+.save-dot.done {
+  background: #d9a441; border-color: #f0c470; color: #3a2600;
+  box-shadow: 0 0 8px rgba(230,180,80,0.55);
+}
+.save-card.empty {
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  min-height: 100px; border-style: dashed; color: rgba(255,255,255,0.3);
+  font-size: 12px; line-height: 1.6; padding: 10px 14px;
+  cursor: url('images/cursor-default.png') 2 2, auto;
+}
+.save-card.empty:hover { background: rgba(0,0,0,0.35); border-color: rgba(255,255,255,0.15); }
+#saves-actions { display: flex; justify-content: center; gap: 14px; margin-top: 22px; }
+.saves-action {
+  min-width: 110px; padding: 10px 18px;
+  background: rgba(255,255,255,0.08); border: 2px solid rgba(255,255,255,0.25);
+  border-radius: 8px; color: #ddd; font-size: 15px; font-family: inherit; letter-spacing: 2px;
+  transition: all 0.18s ease;
+  cursor: url('../Demo_Level0/images/cursor-grab.png') 16 16, pointer;
+}
+.saves-action:hover:not(:disabled) { background: rgba(255,255,255,0.18); border-color: #fff; color: #fff; }
+.saves-action:disabled { opacity: 0.35; cursor: url('images/cursor-default.png') 2 2, auto; }
+.saves-action.danger:hover:not(:disabled) { background: rgba(200,70,55,0.3); border-color: #e06a55; color: #fff; }
+
+/* ==== 简易对话框（通用提示）==== */
+#dialog-box {
+  position: absolute; bottom: 40px; left: 240px;
+  width: 800px; min-height: 70px;
+  background: rgba(255,255,255,0.95); border: 3px solid #333; border-radius: 15px;
+  color: #000; font-size: 20px; line-height: 1.7;
+  padding: 20px; z-index: 700; display: none;
+  text-align: center; box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+  cursor: url('images/cursor-default.png') 2 2, auto;
+}
+#dialog-box.visible { display: block; animation: dialogIn 0.35s ease-out; }
+
+/* 存档确认框：与上面的对话框同一视觉，带「确定 / 取消」两个按钮。
+   外层是全屏拦截层，没选之前点画面任何地方都没有反应 */
+#dialog-confirm {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  z-index: 800; display: none;
+}
+#dialog-confirm.visible { display: block; }
+#dialog-confirm-panel {
+  position: absolute; bottom: 40px; left: 240px;
+  width: 800px; min-height: 70px;
+  background: rgba(255,255,255,0.95); border: 3px solid #333; border-radius: 15px;
+  color: #000; font-size: 20px; line-height: 1.7;
+  padding: 20px; text-align: center; box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+  animation: dialogIn 0.35s ease-out;
+  cursor: url('images/cursor-default.png') 2 2, auto;
+}
+#dialog-confirm-actions { margin-top: 16px; display: flex; gap: 16px; justify-content: center; }
+#dialog-confirm-actions button {
+  min-width: 120px; padding: 8px 20px;
+  background: #f2f2f2; border: 2px solid #333; border-radius: 8px;
+  color: #000; font-size: 17px; font-family: inherit; letter-spacing: 2px;
+  transition: background 0.18s ease;
+  cursor: url('images/cursor-default.png') 2 2, auto;
+}
+#dialog-confirm-actions button:hover { background: #dcdcdc; }
+@keyframes dialogIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ==== 横屏提示遮罩 ==== */
+#landscape-hint {
+  position: fixed; inset: 0;
+  background: #0a0a0a;
+  z-index: 100000;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  color: #fff;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  text-align: center;
+  user-select: none; -webkit-user-select: none;
+}
+#landscape-hint.show { display: flex; }
+#landscape-hint-icon { width: 76px; height: 76px; animation: hintLockPulse 1.8s ease-in-out infinite; }
+@keyframes hintLockPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+#landscape-hint p { font-size: 18px; letter-spacing: 2px; opacity: 0.85; }
+#landscape-hint .hint-sub { font-size: 13px; opacity: 0.5; letter-spacing: 1px; }
+#landscape-hint-close {
+  margin-top: 8px;
+  padding: 10px 40px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 24px;
+  color: #ddd;
+  font-size: 15px;
+  letter-spacing: 2px;
+  cursor: url('images/cursor-default.png') 2 2, auto;
+  transition: background 0.2s, color 0.2s;
+}
+#landscape-hint-close:hover { background: rgba(255,255,255,0.2); color: #fff; }
+</style>
+</head>
+<body>
+
+<!-- 音频 -->
+<audio id="bgm" src="audio/bgm.mp3" loop preload="none"></audio>
+<audio id="sfx-click" src="audio/sfx-click.mp3" preload="auto"></audio>
+
+<!-- 游戏容器 -->
+<div id="game-container">
+
+  <!-- 标题页 room0 -->
+  <div id="title-screen">
+    <div id="title-bar"></div>
+    <div id="btn-start" class="title-btn clickable" onclick="startGame()"></div>
+    <div id="btn-saves" class="title-btn clickable" onclick="toggleSaves()"></div>
+  </div>
+
+  <!-- 存档窗口（与 Demo_Level0 的存档窗口互读同一份 sessionStorage 数据） -->
+  <div id="saves-overlay" onclick="if(event.target===this)toggleSaves()">
+    <div id="saves-panel" onclick="event.stopPropagation()">
+      <button id="saves-close-btn" onclick="toggleSaves()">&times;</button>
+      <h3>存 档</h3>
+      <div id="saves-grid"></div>
+      <div id="saves-actions">
+        <button id="saves-load-btn" class="saves-action" disabled onclick="loadSelectedSave()">加 载</button>
+        <button id="saves-del-btn" class="saves-action danger" disabled onclick="deleteSelectedSave()">删 除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 简易对话框 -->
+  <div id="dialog-box"></div>
+
+  <!-- 存档确认框（与游戏内对话框同一视觉） -->
+  <div id="dialog-confirm">
+    <div id="dialog-confirm-panel">
+      <div id="dialog-confirm-text"></div>
+      <div id="dialog-confirm-actions">
+        <button onclick="confirmYes()">确 定</button>
+        <button onclick="confirmNo()">取 消</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- 横屏提示 -->
+<div id="landscape-hint">
+  <svg id="landscape-hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+  </svg>
+  <p>建议锁定竖屏再把手机横过来</p>
+  <p class="hint-sub">游玩体验更佳</p>
+  <button id="landscape-hint-close">知道了</button>
+</div>
+
+<script>
+// ============================================================
+// ① 设备识别（必须放在 <script> 最顶部，先于 resizeGame()）
+// ============================================================
+(function detectDevice() {
+  const ua = navigator.userAgent;
+  const isIOS     = /iPhone|iPad|iPod/i.test(ua);
+  const isAndroid = /Android/i.test(ua);
+  const isMac     = /Mac/i.test(ua) && !isIOS;
+  const isWindows = /Windows/i.test(ua);
+  const isTablet   = /iPad/i.test(ua) || (isAndroid && !/Mobile/i.test(ua));
+  const isMobileUA = /Mobi|Android|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  const isTouch    = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  const coarsePtr  = window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : false;
+  const noHover    = window.matchMedia ? window.matchMedia('(hover: none)').matches : false;
+  const isTouchPrimary = coarsePtr && noHover;
+  const isMobile   = isMobileUA || isTouchPrimary;
+  const isWeChat  = /MicroMessenger/i.test(ua);
+  const isQQ      = /QQ\//i.test(ua);
+  const isSafari  = /Safari/i.test(ua) && !/Chrome|CriOS|Edg|OPR/i.test(ua);
+  const isChrome  = /Chrome|CriOS/i.test(ua) && !/Edg|OPR/i.test(ua);
+  const isEdge    = /Edg/i.test(ua);
+  const isFirefox = /Firefox/i.test(ua);
+  const isPortrait = window.matchMedia
+    ? window.matchMedia('(orientation: portrait)').matches
+    : window.innerHeight > window.innerWidth;
+  window.deviceInfo = {
+    isMobile, isTablet, isMobileDevice: isMobile || isTablet, isDesktop: !isMobile && !isTablet,
+    isTouch, isIOS, isAndroid, isMac, isWindows,
+    isWeChat, isQQ, isSafari, isChrome, isEdge, isFirefox,
+    isPortrait, isLandscape: !isPortrait,
+    os: isIOS ? 'ios' : isAndroid ? 'android' : isWindows ? 'windows' : isMac ? 'mac' : 'other',
+    browser: isWeChat ? 'wechat' : isQQ ? 'qq' : isSafari ? 'safari'
+           : isEdge ? 'edge' : isFirefox ? 'firefox' : isChrome ? 'chrome' : 'other',
+    type: isMobile ? 'mobile' : isTablet ? 'tablet' : 'desktop'
+  };
+  const root = document.documentElement;
+  root.classList.add('device-' + deviceInfo.type);
+  root.setAttribute('data-device', deviceInfo.type);
+  if (deviceInfo.isTouch)     root.classList.add('device-touch');
+  if (deviceInfo.isIOS)       root.classList.add('device-ios');
+  if (deviceInfo.isAndroid)   root.classList.add('device-android');
+  if (deviceInfo.isWeChat)    root.classList.add('device-wechat');
+  if (deviceInfo.isPortrait)  root.classList.add('device-portrait');
+  else                        root.classList.add('device-landscape');
+})();
+
+// ============================================================
+// ② 画布缩放 + 移动端强制横屏
+// ============================================================
+function resizeGame() {
+  const gc = document.getElementById('game-container');
+  const rotated = deviceInfo.isMobileDevice && deviceInfo.isPortrait;
+  let s;
+  if (rotated) {
+    s = Math.min(window.innerHeight / 1280, window.innerWidth / 720);
+    gc.style.transform = `translate(-50%, -50%) rotate(90deg) scale(${s})`;
+  } else {
+    s = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+    gc.style.transform = `translate(-50%, -50%) scale(${s})`;
+  }
+  gc.classList.toggle('rotated', rotated);
+  window._gameScale = s;
+}
+window.addEventListener('resize', resizeGame);
+resizeGame();
+
+// ============================================================
+// ③ 方向监听 + 横屏锁屏提示
+// ============================================================
+let landscapeHintDismissed = false;
+let landscapeHintTimer = null;
+function updateLandscapeHint() {
+  const hint = document.getElementById('landscape-hint');
+  if (!hint) return;
+  const shouldShow = deviceInfo.isMobileDevice && deviceInfo.isLandscape && !landscapeHintDismissed;
+  if (shouldShow && !hint.classList.contains('show')) {
+    hint.classList.add('show');
+    if (landscapeHintTimer) clearTimeout(landscapeHintTimer);
+    landscapeHintTimer = setTimeout(dismissLandscapeHint, 6000);
+  } else if (!shouldShow) {
+    hint.classList.remove('show');
+  }
+}
+function dismissLandscapeHint() {
+  landscapeHintDismissed = true;
+  if (landscapeHintTimer) { clearTimeout(landscapeHintTimer); landscapeHintTimer = null; }
+  const hint = document.getElementById('landscape-hint');
+  if (hint) hint.classList.remove('show');
+}
+function updateOrientation() {
+  const isPortrait = window.matchMedia
+    ? window.matchMedia('(orientation: portrait)').matches
+    : (window.innerHeight > window.innerWidth);
+  deviceInfo.isPortrait = isPortrait;
+  deviceInfo.isLandscape = !isPortrait;
+  const root = document.documentElement;
+  root.classList.toggle('device-portrait', isPortrait);
+  root.classList.toggle('device-landscape', !isPortrait);
+  resizeGame();
+  updateLandscapeHint();
+}
+window.addEventListener('resize', updateOrientation);
+window.addEventListener('orientationchange', updateOrientation);
+if (window.screen && screen.orientation && screen.orientation.addEventListener) {
+  screen.orientation.addEventListener('change', updateOrientation);
+}
+updateOrientation();
+
+// ============================================================
+// 音频全局变量
+// ============================================================
+let sfxVolume = 0.8;
+let musicVolume = 0.7;
+let audioCtx = null;
+let bgmStarted = false;
+
+// 占位音频开关：当前 audio/*.mp3 为静音占位，开启后额外用 Web Audio 合成可听音效。
+const PLACEHOLDER_SYNTH = true;
+
+// ============================================================
+// 全局常量 / 跨关卡共享存储协议（与 Demo_Level0~8 保持一致）
+// ============================================================
+// 本文件为整条"林克游戏"Demo 链的入口窗口：负责记录全局状态并调用 Level0~8。
+// 关键键名与 Demo_Level0~8 保持一致：
+//   linkgame_inventory / backpack / transportCardGiven / roomAUnlocked
+//   linkgame_levels / room / pendingReturn / session / completionReady / completionDone
+//   linkgame_hubEntry   '1'  一次性标记：Hub 已重置并调度进入 Level0
+//   linkgame_music_vol / linkgame_sfx_vol   音量设置（0~100，全部关卡共用）
+const STORAGE_PREFIX = 'linkgame_';
+
+// 读取各关卡里设置的音量：Hub 没有设置键，只读不写
+function loadVolumes() {
+  const mv = localStorage.getItem(STORAGE_PREFIX + 'music_vol');
+  const sv = localStorage.getItem(STORAGE_PREFIX + 'sfx_vol');
+  if (mv !== null) musicVolume = parseInt(mv) / 100;
+  if (sv !== null) sfxVolume = parseInt(sv) / 100;
+}
+
+// ============================================================
+// 存储辅助 + 重置全局进度
+// ============================================================
+function resetProgress() {
+  ['inventory', 'backpack', 'transportCardGiven', 'roomAUnlocked', 'levels', 'room', 'pendingReturn', 'session', 'completionReady', 'completionDone', 'hubEntry']
+    .forEach(k => localStorage.removeItem(STORAGE_PREFIX + k));
+}
+
+// ============================================================
+// 简易对话框（通用提示）
+// ============================================================
+let dialogTimer = null;
+function showDialog(text, duration) {
+  const box = document.getElementById('dialog-box');
+  box.textContent = text;
+  box.classList.add('visible');
+  clearTimeout(dialogTimer);
+  dialogTimer = setTimeout(hideDialog, duration === undefined ? 3500 : duration);
+}
+function hideDialog() {
+  clearTimeout(dialogTimer);
+  document.getElementById('dialog-box').classList.remove('visible');
+}
+
+// ============================================================
+// 存档确认框（替代浏览器自带的 confirm 弹窗：同步返回值 → 回调）
+// ============================================================
+let confirmOnYes = null;
+let confirmOnNo = null;
+function showConfirm(text, onYes, onNo) {
+  document.getElementById('dialog-confirm-text').textContent = text;
+  confirmOnYes = onYes || null;
+  confirmOnNo = onNo || null;
+  document.getElementById('dialog-confirm').classList.add('visible');
+  playSound('click');
+}
+function hideConfirm() {
+  document.getElementById('dialog-confirm').classList.remove('visible');
+  confirmOnYes = null;
+  confirmOnNo = null;
+}
+function confirmYes() {
+  const cb = confirmOnYes;
+  hideConfirm();
+  if (cb) cb();
+}
+function confirmNo() {
+  const cb = confirmOnNo;
+  hideConfirm();
+  if (cb) cb();
+}
+
+// ============================================================
+// 音频 API（精简：仅 click 音效 + BGM）
+// ============================================================
+function playSound(type) {
+  const el = document.getElementById('sfx-' + type);
+  if (el) {
+    try { el.volume = sfxVolume; el.currentTime = 0; el.play(); } catch (e) {}
+  }
+  if (PLACEHOLDER_SYNTH) synthPlaceholder(type);
+}
+function synthPlaceholder(type) {
+  try {
+    const ctx = getAudioCtx();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    const now = ctx.currentTime;
+    const freq = { click: 880 }[type] || 600;
+    o.type = 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.15 * sfxVolume, now + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(now); o.stop(now + 0.2);
+  } catch (e) {}
+}
+function getAudioCtx() {
+  if (!audioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) audioCtx = new AC();
+  }
+  return audioCtx;
+}
+function startBgm() {
+  if (bgmStarted) return;
+  bgmStarted = true;
+  const bgmEl = document.getElementById('bgm');
+  if (bgmEl) { bgmEl.volume = musicVolume * 0.4; bgmEl.play().catch(function () {}); }
+  try {
+    const ctx = getAudioCtx();
+    const g = ctx.createGain();
+    g.gain.value = musicVolume * 0.04;
+    g.connect(ctx.destination);
+    const o1 = ctx.createOscillator(); o1.frequency.value = 55; o1.type = 'sine';
+    const o2 = ctx.createOscillator(); o2.frequency.value = 55.5; o2.type = 'sine';
+    o1.connect(g); o2.connect(g);
+    o1.start(); o2.start();
+  } catch (e) {}
+}
+// ============================================================
+// 标题页 room0 / 开始游玩 / 查看存档
+// ============================================================
+function showTitle() {
+  document.getElementById('title-screen').classList.add('show');
+  hideDialog();
+}
+function hideTitle() {
+  document.getElementById('title-screen').classList.remove('show');
+}
+function startGame() {
+  resetProgress();
+  hideTitle();
+  localStorage.setItem(STORAGE_PREFIX + 'room', 'A');
+  localStorage.setItem(STORAGE_PREFIX + 'session', '1');
+  localStorage.setItem(STORAGE_PREFIX + 'hubEntry', '1');
+  window.location.href = '../Demo_Level0/index.html';
+}
+// ============================================================
+// 存档窗口（查看存档）
+// 与 Demo_Level0 的存档窗口互读同一份 sessionStorage 数据：
+// sessionStorage 只在同一个标签页内跨页面导航时保留，关闭标签页/浏览器即全部消失，
+// 所以存档只限于本次打开的游戏，也不会在本地留下任何存档文件。
+// 一个存档 = 一份 Level0 记录的关卡完成情况快照，不涉及 Level1~8 的内部进度。
+// 本窗口只做「查看 / 选中 / 加载 / 删除」，没有「记录当前存档」（那是 Level0 的窗口 B）。
+// ============================================================
+const SAVE_STORE_KEY = 'linkgame_saves';
+const SAVE_MAX = 5;
+// 原样保存这 7 个键的字符串值，不做转译
+const SAVE_PROGRESS_KEYS = ['inventory', 'backpack', 'transportCardGiven', 'roomAUnlocked',
+                            'levels', 'completionReady', 'completionDone'];
+// 8 关的通关道具 id（与 Level0 的 LEVEL_ITEM_IDS 同源）：存档卡片上 8 个圆的点亮依据
+const SAVE_LEVEL_ITEMS = [null, 'poetry', 'helmet', 'erjiyuan-final', 'stamped-postcard',
+                          'ai-glasses', 'beat-badge', 'polaroid', 'dog'];
+
+let saveSelectedIndex = -1;    // 选中的存档下标，-1 = 未选中
+
+function readSaveStore() {
+  try {
+    const list = JSON.parse(sessionStorage.getItem(SAVE_STORE_KEY) || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch (e) { return []; }
+}
+function writeSaveStore(list) {
+  try { sessionStorage.setItem(SAVE_STORE_KEY, JSON.stringify(list)); } catch (e) {}
+}
+function applyProgress(progress) {
+  SAVE_PROGRESS_KEYS.forEach(k => localStorage.removeItem(STORAGE_PREFIX + k));
+  Object.keys(progress || {}).forEach(k => {
+    if (SAVE_PROGRESS_KEYS.indexOf(k) !== -1) localStorage.setItem(STORAGE_PREFIX + k, progress[k]);
+  });
+}
+function saveBackpackOf(progress) {
+  let bp = [];
+  try { bp = JSON.parse((progress && progress.backpack) || '[]'); } catch (e) { bp = []; }
+  return Array.isArray(bp) ? bp : [];
+}
+function saveDoneCount(progress) {
+  const bp = saveBackpackOf(progress);
+  let n = 0;
+  for (let i = 1; i <= 8; i++) if (bp.indexOf(SAVE_LEVEL_ITEMS[i]) !== -1) n++;
+  return n;
+}
+
+function toggleSaves() {
+  const ov = document.getElementById('saves-overlay');
+  ov.classList.toggle('show');
+  if (ov.classList.contains('show')) {
+    saveSelectedIndex = -1;
+    renderSavesWindow();
+  }
+  playSound('click');
+}
+function renderSavesWindow() {
+  const grid = document.getElementById('saves-grid');
+  const list = readSaveStore();
+  grid.innerHTML = '';
+  list.forEach((s, i) => {
+    const bp = saveBackpackOf(s.progress);
+    const card = document.createElement('div');
+    card.className = 'save-card' + (i === saveSelectedIndex ? ' selected' : '');
+    const head = document.createElement('div');
+    head.className = 'save-card-head';
+    const idx = document.createElement('span');
+    idx.className = 'save-card-idx';
+    idx.textContent = '存档 ' + (i + 1);
+    const cnt = document.createElement('span');
+    cnt.textContent = saveDoneCount(s.progress) + '/8';
+    head.appendChild(idx); head.appendChild(cnt);
+    card.appendChild(head);
+    const dots = document.createElement('div');
+    dots.className = 'save-card-dots';
+    for (let lvl = 1; lvl <= 8; lvl++) {
+      const dot = document.createElement('div');
+      dot.className = 'save-dot' + (bp.indexOf(SAVE_LEVEL_ITEMS[lvl]) !== -1 ? ' done' : '');
+      dot.textContent = String(lvl);
+      dots.appendChild(dot);
+    }
+    card.appendChild(dots);
+    card.addEventListener('click', () => onSaveCardClick(i));
+    grid.appendChild(card);
+  });
+  if (list.length === 0) {
+    const tip = document.createElement('div');
+    tip.className = 'save-card empty';
+    tip.textContent = '还没有存档，请先在关卡里记录存档';
+    grid.insertBefore(tip, grid.firstChild);
+  }
+  updateSaveActions();
+}
+function updateSaveActions() {
+  const has = saveSelectedIndex >= 0;
+  document.getElementById('saves-load-btn').disabled = !has;
+  document.getElementById('saves-del-btn').disabled = !has;
+}
+function onSaveCardClick(i) {
+  saveSelectedIndex = (saveSelectedIndex === i) ? -1 : i;
+  playSound('click');
+  renderSavesWindow();
+}
+function loadSelectedSave() {
+  if (saveSelectedIndex < 0) return;
+  const list = readSaveStore();
+  const s = list[saveSelectedIndex];
+  if (!s) return;
+  const n = saveSelectedIndex + 1;
+  showConfirm('加载「存档 ' + n + '」会覆盖当前进度，确定吗？', function () {
+    applyProgress(s.progress);
+    // 加载后立刻进入游戏：与 startGame() 相同，只是不重置进度
+    hideTitle();
+    document.getElementById('saves-overlay').classList.remove('show');
+    localStorage.setItem(STORAGE_PREFIX + 'room', 'A');
+    localStorage.setItem(STORAGE_PREFIX + 'session', '1');
+    localStorage.setItem(STORAGE_PREFIX + 'hubEntry', '1');
+    window.location.href = '../Demo_Level0/index.html';
+  });
+}
+function deleteSelectedSave() {
+  if (saveSelectedIndex < 0) return;
+  const list = readSaveStore();
+  if (!list[saveSelectedIndex]) return;
+  const idx = saveSelectedIndex;
+  showConfirm('确定删除「存档 ' + (idx + 1) + '」吗？删除后无法恢复。', function () {
+    const l = readSaveStore();
+    if (!l[idx]) return;
+    l.splice(idx, 1);
+    writeSaveStore(l);
+    saveSelectedIndex = -1;
+    playSound('click');
+    renderSavesWindow();
+  });
+}
+
+// ============================================================
+// 初始化：入口窗口每次打开都显示标题页，永不恢复进度
+// ============================================================
+function initGame() {
+  loadVolumes();   // 跟随各关卡里设置的音量
+  showTitle();
+  // 首交互启动 BGM
+  const startBgmOnInteract = () => {
+    if (musicVolume > 0.01) startBgm();
+    document.removeEventListener('click', startBgmOnInteract);
+  };
+  document.addEventListener('click', startBgmOnInteract);
+  console.log('🎮 林克游戏 — 标题页 / 重置进度 / 调度 Level0~8');
+}
+window.addEventListener('DOMContentLoaded', initGame);
+</script>
+</body>
+</html>
