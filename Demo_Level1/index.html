@@ -1,0 +1,1805 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>丰施街区</title>
+<style>
+/* ================================================================
+   BASE STYLES (GAME-TEMPLATE.md §3)
+   ================================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #0a0a0a; overflow: hidden;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  width: 100vw; height: 100vh;
+  user-select: none; -webkit-user-select: none;
+}
+#game-container {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%); transform-origin: center center;
+  width: 1280px; height: 720px;
+  background: #222; overflow: hidden;
+  box-shadow: 0 0 20px rgba(0,0,0,0.8);
+  display: flex; flex-direction: row;
+  cursor: url('images/cursor-default.png') 2 2, auto;
+}
+
+/* Area Layout */
+#room-area { width: 1120px; height: 720px; position: relative; overflow: hidden; background: #444; }
+#ui-inventory {
+  width: 160px; height: 720px;
+  background-image: url('images/ui-inventory-bg.png'); background-size: cover;
+  border-left: 2px solid #000;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 15px 0; gap: 15px;
+  overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none;
+}
+#ui-inventory::-webkit-scrollbar { display: none; }
+
+/* Rooms */
+.room { display: none; position: absolute; top: 0; left: 0;
+  width: 1120px; height: 720px;
+  background-size: cover; background-position: center; background-repeat: no-repeat; }
+.room.active-room { display: block; }
+#room-A { background-image: url('images/room-A-bg.png'); }
+#room-B { background-image: url('images/room-B-bg.png'); }
+#room-C { background-image: url('images/room-C-bg.png'); }
+#room-D { background-image: url('images/room-D-bg.png'); }
+
+/* Entities */
+.entity {
+  position: absolute;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+}
+.clickable { transition: filter 0.2s; }
+.clickable:hover { filter: brightness(1.2); }
+
+/* Dialog Box */
+#dialog-box {
+  position: absolute; bottom: 40px; left: 160px;
+  width: 800px; min-height: 70px;
+  background: rgba(255,255,255,0.95); border: 3px solid #333; border-radius: 15px;
+  color: #000; font-size: 20px; line-height: 1.7;
+  padding: 20px; z-index: 10001; display: none;
+  text-align: center; box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+}
+#dialog-box.visible { display: block; animation: dialogIn 0.35s ease-out; }
+@keyframes dialogIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+/* 对话框模态锁：对话框显示期间锁定整个游戏界面，仅对话框本身可点击 */
+#dialog-lock {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  z-index: 10000; display: none;
+}
+#dialog-lock.show { display: block; }
+
+/* NPC Speech Bubble */
+.npc-speech {
+  position: absolute; z-index: 190;
+  background: rgba(30, 20, 40, 0.9); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 10px;
+  padding: 8px 20px; font-size: 20px; color: #ccc;
+  white-space: nowrap; display: none;
+}
+.npc-speech::after {
+  content: ''; position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%);
+  width: 0; height: 0;
+  border-left: 8px solid transparent; border-right: 8px solid transparent;
+  border-top: 8px solid rgba(30, 20, 40, 0.9);
+}
+
+/* Nav Buttons */
+.nav-btn {
+  position: absolute; top: 335px;
+  width: 50px; height: 60px;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  z-index: 150; opacity: 0.7; transition: opacity 0.3s; display: none;
+}
+.nav-btn:hover { filter: brightness(1.2); }
+.nav-btn.visible { display: block; }
+#nav-left  { left: 12px;  background-image: url('images/nav-left.png'); }
+#nav-right { right: 12px; background-image: url('images/nav-right.png'); }
+
+/* Inventory Slots */
+.inv-slot { width: 120px; height: 120px; background: rgba(0,0,0,0.3);
+  border-radius: 5px; flex-shrink: 0; position: relative;
+  display: flex; align-items: center; justify-content: center; }
+.inv-slot:empty { border: 1px dashed rgba(255,255,255,0.2); }
+.inv-item {
+  width: 100%; height: 100%;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  border-radius: 3px;
+  cursor: url('images/cursor-grab.png') 16 16, grab;
+}
+.inv-count {
+  position: absolute; bottom: 5px; right: 8px;
+  background: rgba(0,0,0,0.7); color: #ffd700;
+  font-size: 14px; font-weight: bold;
+  padding: 1px 6px; border-radius: 8px; pointer-events: none;
+}
+
+/* Settings Button */
+#settings-btn {
+  position: absolute;
+  top: 12px; right: 172px;
+  width: 42px; height: 42px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+#settings-btn:hover {
+  background: rgba(0, 0, 0, 0.75);
+  border-color: rgba(255, 255, 255, 0.6);
+  transform: rotate(30deg);
+}
+#settings-btn svg {
+  width: 24px; height: 24px;
+  fill: rgba(255, 255, 255, 0.85);
+}
+
+/* Backpack Button */
+#backpack-btn {
+  position: absolute;
+  top: 12px; right: 222px;
+  width: 42px; height: 42px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+#backpack-btn:hover {
+  background: rgba(0, 0, 0, 0.75);
+  border-color: rgba(255, 255, 255, 0.6);
+}
+#backpack-btn svg {
+  width: 24px; height: 24px;
+  fill: rgba(255, 255, 255, 0.85);
+}
+
+/* Settings Overlay */
+#settings-overlay {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 400;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+#settings-overlay.show {
+  display: flex;
+}
+
+#settings-panel {
+  position: relative;
+  width: 400px;
+  background: rgba(20, 20, 30, 0.92);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  padding: 32px 36px 28px;
+  color: #e0e0e0;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+#settings-panel h3 {
+  text-align: center;
+  margin-bottom: 24px;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: 2px;
+  color: #fff;
+}
+
+/* Close button */
+#settings-close-btn {
+  position: absolute;
+  top: 10px; right: 16px;
+  width: 32px; height: 32px;
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 24px;
+  transition: color 0.2s;
+  line-height: 32px;
+  text-align: center;
+  padding: 0;
+}
+#settings-close-btn:hover { color: #fff; }
+
+/* Volume row */
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.vol-icon {
+  width: 22px; height: 22px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+.vol-label {
+  width: 56px;
+  text-align: right;
+  font-size: 15px;
+  color: #bbb;
+  flex-shrink: 0;
+}
+
+/* Custom range slider */
+.setting-row input[type="range"] {
+  flex: 1;
+  height: 6px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 3px;
+  outline: none;
+}
+.setting-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #888;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s ease;
+}
+.setting-row input[type="range"]::-webkit-slider-thumb:hover {
+  filter: brightness(1.2);
+}
+.setting-row input[type="range"]::-moz-range-thumb {
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #888;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+.setting-row input[type="range"]::-moz-range-thumb:hover {
+  filter: brightness(1.2);
+}
+.vol-value {
+  width: 36px;
+  text-align: center;
+  font-size: 14px;
+  color: #aaa;
+  flex-shrink: 0;
+}
+
+/* External link button */
+#settings-link-btn {
+  width: 100%;
+  margin-top: 24px;
+  padding: 12px 0;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 10px;
+  color: #ddd;
+  font-size: 16px;
+  letter-spacing: 1px;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+#settings-link-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.45);
+  color: #fff;
+}
+
+/* Backpack Overlay */
+#backpack-overlay {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 400;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+#backpack-overlay.show { display: flex; }
+
+#backpack-panel {
+  position: relative;
+  width: 340px;
+  background: rgba(20, 20, 30, 0.92);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  padding: 32px 28px 28px;
+  color: #e0e0e0;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+#backpack-panel h3 {
+  text-align: center;
+  margin-bottom: 20px;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: 2px;
+  color: #fff;
+}
+
+#backpack-close-btn {
+  position: absolute;
+  top: 10px; right: 16px;
+  width: 32px; height: 32px;
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 24px;
+  transition: color 0.2s;
+  line-height: 32px;
+  text-align: center;
+  padding: 0;
+}
+#backpack-close-btn:hover { color: #fff; }
+
+/* 3x3 backpack grid */
+#backpack-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 84px);
+  grid-template-rows: repeat(3, 84px);
+  gap: 10px;
+  justify-content: center;
+}
+
+.bp-slot {
+  width: 84px; height: 84px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 2px dashed #444;
+  border-radius: 6px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bp-item {
+  width: 100%; height: 100%;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+/* Pickup Modal */
+#pickup-overlay {
+  position: absolute; top: 0; left: 0;
+  width: 1120px; height: 720px;
+  background: rgba(0,0,0,0.7); z-index: 350; display: none;
+  align-items: center; justify-content: center;
+}
+#pickup-overlay.visible { display: flex; }
+#pickup-panel { background: #1a1a2e; border: 2px solid #555; border-radius: 16px; padding: 30px 40px; width: 300px; color: #fff; text-align: center; }
+#pickup-panel h3 { margin-bottom: 20px; font-size: 20px; letter-spacing: 2px; }
+#pickup-item-img { width: 100px; height: 100px; background-size: contain; background-repeat: no-repeat; background-position: center; margin: 0 auto 12px; }
+#pickup-item-name { font-size: 16px; color: #ccc; margin-bottom: 24px; }
+#pickup-confirm-btn { padding: 10px 40px; border: none; border-radius: 8px; background: #4a9eff; color: #fff; font-size: 15px; cursor: url('images/cursor-default.png') 2 2, auto; letter-spacing: 2px; }
+#pickup-confirm-btn:hover { filter: brightness(1.2); }
+
+/* ================================================================
+   IMAGE VIEWER OVERLAY
+   ================================================================ */
+#image-viewer-overlay {
+  position: absolute; top: 0; left: 0;
+  width: 1120px; height: 720px;
+  background: rgba(0,0,0,0.75); z-index: 250; display: none;
+  align-items: center; justify-content: center;
+}
+#image-viewer-overlay.visible { display: flex; }
+#image-viewer-content {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+}
+#image-viewer-img {
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+}
+#image-viewer-img.poster-3x4 { width: 314px; height: 420px; }
+#image-viewer-img.poster-4x3 { width: 420px; height: 314px; }
+#image-viewer-img.note-view { width: 470px; height: 235px; }
+
+/* Hidden item zone inside image viewer */
+.hidden-item-zone {
+  position: absolute;
+  background: rgba(255,255,255,0.05); z-index: 5;
+  animation: hiddenZoneBlink 1.4s ease-in-out infinite;
+}
+.hidden-item-zone.clickable:hover { filter: brightness(1.5); background: rgba(255,255,255,0.2); }
+@keyframes hiddenZoneBlink {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+  50% { box-shadow: 0 0 14px 4px rgba(255,255,255,0.85); }
+}
+
+/* ================================================================
+   PUZZLE OVERLAY
+   ================================================================ */
+#puzzle-overlay {
+  position: absolute; top: 0; left: 0;
+  width: 1120px; height: 720px;
+  background: rgba(0,0,0,0.8); z-index: 360; display: none;
+  align-items: center; justify-content: center; flex-direction: column;
+}
+#puzzle-overlay.visible { display: flex; }
+#puzzle-content {
+  background: #1a1a2e; border: 2px solid #555; border-radius: 16px;
+  padding: 50px 60px; color: #fff; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 24px;
+}
+#puzzle-note-img {
+  width: 400px; height: 200px;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  background-image: url('images/item-note-expanded.png');
+}
+#puzzle-title { font-size: 18px; letter-spacing: 2px; color: #ccc; }
+#puzzle-slots {
+  display: flex; gap: 12px; justify-content: center;
+}
+.puzzle-slot {
+  width: 80px; height: 80px;
+  border: 2px dashed rgba(255,255,255,0.4);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.05);
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+}
+.puzzle-slot.filled {
+  border-style: solid; border-color: rgba(255,255,255,0.6);
+}
+.puzzle-slot .slot-index {
+  position: absolute; bottom: -18px; font-size: 12px; color: rgba(255,255,255,0.4);
+}
+.puzzle-slot-item {
+  width: 64px; height: 64px;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+}
+#puzzle-hint { font-size: 14px; color: #888; }
+
+/* ================================================================
+   DRAG SYSTEM
+   ================================================================ */
+/* 统一：原生控件（<button>、滑块等）不继承自定义指针，这里显式指定 */
+button, input[type="range"] { cursor: url('images/cursor-default.png') 2 2, auto; }
+html.dragging, body.dragging, body.dragging * { cursor: none !important; }
+#drag-cursor-follower {
+  position: fixed; pointer-events: none; z-index: 99999;
+  width: 32px; height: 32px;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  transform: translate(-16px, -16px);
+}
+body.dragging .drag-over-target { filter: brightness(1.3) drop-shadow(0 0 6px cyan); }
+
+/* === 横屏提示遮罩 === */
+#landscape-hint {
+  position: fixed; inset: 0;
+  background: #0a0a0a;
+  z-index: 100000;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  color: #fff;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  text-align: center;
+  user-select: none; -webkit-user-select: none;
+}
+#landscape-hint.show { display: flex; }
+#landscape-hint-icon {
+  width: 76px; height: 76px;
+  animation: hintLockPulse 1.8s ease-in-out infinite;
+}
+@keyframes hintLockPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+#landscape-hint p { font-size: 18px; letter-spacing: 2px; opacity: 0.85; }
+#landscape-hint .hint-sub { font-size: 13px; opacity: 0.5; letter-spacing: 1px; }
+#landscape-hint-close {
+  margin-top: 8px;
+  padding: 10px 40px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 24px;
+  color: #ddd;
+  font-size: 15px;
+  letter-spacing: 2px;
+  cursor: url('images/cursor-default.png') 2 2, auto;
+  transition: background 0.2s, color 0.2s;
+}
+#landscape-hint-close:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+#return-btn {
+  position: absolute;
+  top: 12px; left: 12px;
+  width: 42px; height: 42px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  z-index: 300;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+#return-btn:hover { background: rgba(0, 0, 0, 0.75); border-color: rgba(255, 255, 255, 0.6); }
+#return-btn svg { width: 24px; height: 24px; fill: rgba(255, 255, 255, 0.85); }
+</style>
+</head>
+<body>
+
+<!-- Audio -->
+<audio id="bgm" src="audio/bgm.mp3" loop preload="none"></audio>
+<audio id="sfx-collect" src="audio/sfx-collect.mp3" preload="auto"></audio>
+<audio id="sfx-nav" src="audio/sfx-nav.wav" preload="auto"></audio>
+<audio id="sfx-click" src="audio/sfx-click.wav" preload="auto"></audio>
+<audio id="sfx-dialog" src="audio/sfx-dialog.wav" preload="auto"></audio>
+<audio id="sfx-pickup" src="audio/sfx-pickup.wav" preload="auto"></audio>
+<audio id="sfx-drop" src="audio/sfx-drop.wav" preload="auto"></audio>
+
+<!-- Game Container -->
+<div id="game-container">
+
+  <!-- Room Area -->
+  <div id="room-area">
+
+    <!-- Room A -->
+    <div id="room-A" class="room active-room" data-room="A"></div>
+
+    <!-- Room B -->
+    <div id="room-B" class="room" data-room="B"></div>
+
+    <!-- Room C -->
+    <div id="room-C" class="room" data-room="C"></div>
+
+    <!-- Room D -->
+    <div id="room-D" class="room" data-room="D"></div>
+
+    <!-- NPC Speech Bubbles -->
+    <div id="speech-npc1" class="npc-speech"></div>
+    <div id="speech-npc2" class="npc-speech"></div>
+    <div id="speech-npc3" class="npc-speech"></div>
+    <div id="speech-npc4" class="npc-speech"></div>
+
+    <!-- Dialog Box -->
+    <div id="dialog-box"></div>
+
+    <!-- Nav Buttons -->
+    <div id="nav-left" class="nav-btn" onclick="changeRoom(-1)"></div>
+    <div id="nav-right" class="nav-btn" onclick="changeRoom(1)"></div>
+
+    <!-- Image Viewer Overlay -->
+    <div id="image-viewer-overlay" onclick="if(event.target===this)closeImageViewer()">
+      <div id="image-viewer-content">
+        <div id="image-viewer-img"></div>
+      </div>
+    </div>
+
+    <!-- Puzzle Overlay -->
+    <div id="puzzle-overlay">
+      <div id="puzzle-content">
+        <div id="puzzle-note-img"></div>
+        <div id="puzzle-title">请按正确顺序放置字符</div>
+        <div id="puzzle-slots">
+          <div class="puzzle-slot" data-puzzle-slot="0"><span class="slot-index">①</span></div>
+          <div class="puzzle-slot" data-puzzle-slot="1"><span class="slot-index">②</span></div>
+          <div class="puzzle-slot" data-puzzle-slot="2"><span class="slot-index">③</span></div>
+          <div class="puzzle-slot" data-puzzle-slot="3"><span class="slot-index">④</span></div>
+          <div class="puzzle-slot" data-puzzle-slot="4"><span class="slot-index">⑤</span></div>
+        </div>
+        <div id="puzzle-hint"></div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Inventory -->
+  <div id="ui-inventory"></div>
+
+  <!-- 对话框模态锁（对话框显示期间锁定界面，仅对话框本身可点击） -->
+  <div id="dialog-lock"></div>
+
+  <!-- Backpack Button -->
+  <div id="backpack-btn" onclick="toggleBackpack()" style="display:none">
+    <svg viewBox="0 0 24 24"><path d="M20 6h-4V4c0-1.1-.9-2-2-2h-4c-1.1 0-2 .9-2 2v2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zM10 4h4v2h-4V4zm10 16H4V8h16v12z"/><path d="M9 12h2v2H9zm4 0h2v2h-2z"/></svg>
+  </div>
+
+  <!-- Settings Button -->
+    <!-- 返回 Level0 -->
+  <div id="return-btn" onclick="returnToLevel0()">
+    <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+  </div>
+<div id="settings-btn" onclick="toggleSettings()">
+    <svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
+  </div>
+
+  <!-- Settings Overlay -->
+  <div id="settings-overlay" onclick="if(event.target===this)toggleSettings()">
+    <div id="settings-panel" onclick="event.stopPropagation()">
+      <button id="settings-close-btn" onclick="toggleSettings()">&times;</button>
+      <h3>设 置</h3>
+      <div class="setting-row">
+        <svg class="vol-icon" viewBox="0 0 24 24" fill="rgba(255,255,255,0.7)"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+        <span class="vol-label">音乐</span>
+        <input type="range" id="vol-music" min="0" max="100" value="70" oninput="onMusicVolume(this.value)">
+        <span class="vol-value" id="vol-music-label">70</span>
+      </div>
+      <div class="setting-row">
+        <svg class="vol-icon" viewBox="0 0 24 24" fill="rgba(255,255,255,0.7)"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+        <span class="vol-label">音效</span>
+        <input type="range" id="vol-sfx" min="0" max="100" value="80" oninput="onSfxVolume(this.value)">
+        <span class="vol-value" id="vol-sfx-label">80</span>
+      </div>
+      <button id="settings-link-btn" onclick="openExternalLink()">查看更多内容 →</button>
+    </div>
+  </div>
+
+  <!-- Backpack Overlay -->
+  <div id="backpack-overlay" onclick="if(event.target===this)toggleBackpack()">
+    <div id="backpack-panel" onclick="event.stopPropagation()">
+      <button id="backpack-close-btn" onclick="toggleBackpack()">&times;</button>
+      <h3>背 包</h3>
+      <div id="backpack-grid">
+        <div class="bp-slot"></div><div class="bp-slot"></div><div class="bp-slot"></div>
+        <div class="bp-slot"></div><div class="bp-slot"></div><div class="bp-slot"></div>
+        <div class="bp-slot"></div><div class="bp-slot"></div><div class="bp-slot"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pickup Modal -->
+  <div id="pickup-overlay">
+    <div id="pickup-panel">
+      <h3>已回收至背包</h3>
+      <div id="pickup-item-img"></div>
+      <div id="pickup-item-name"></div>
+      <button id="pickup-confirm-btn" onclick="confirmPickup()">确 认</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- 横屏提示：建议锁定旋屏（一次性、可关闭、6 秒自动消失） -->
+<div id="landscape-hint">
+  <svg id="landscape-hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+  </svg>
+  <p>建议锁定竖屏再把手机横过来</p>
+  <p class="hint-sub">游玩体验更佳</p>
+  <button id="landscape-hint-close">知道了</button>
+</div>
+
+<script>
+// ============================================================
+// ① 设备识别（必须放在 <script> 最顶部，先于 resizeGame()）
+// 生成 window.deviceInfo，并给 <html> 打上 device-* 类
+// ============================================================
+(function detectDevice() {
+  const ua = navigator.userAgent;
+
+  // 系统
+  const isIOS     = /iPhone|iPad|iPod/i.test(ua);
+  const isAndroid = /Android/i.test(ua);
+  const isMac     = /Mac/i.test(ua) && !isIOS;
+  const isWindows = /Windows/i.test(ua);
+
+  // 设备形态
+  const isTablet   = /iPad/i.test(ua) || (isAndroid && !/Mobile/i.test(ua));
+  const isMobileUA = /Mobi|Android|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  const isTouch    = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  const coarsePtr  = window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : false;
+  const noHover    = window.matchMedia ? window.matchMedia('(hover: none)').matches : false;
+  // 只有「主指针是粗指针且无悬停能力」才算触屏为主（手机/平板），
+  // 避免把带触屏的桌面笔记本误判成移动端。
+  const isTouchPrimary = coarsePtr && noHover;
+  const isMobile   = isMobileUA || isTouchPrimary;
+
+  // 浏览器
+  const isWeChat  = /MicroMessenger/i.test(ua);
+  const isQQ      = /QQ\//i.test(ua);
+  const isSafari  = /Safari/i.test(ua) && !/Chrome|CriOS|Edg|OPR/i.test(ua);
+  const isChrome  = /Chrome|CriOS/i.test(ua) && !/Edg|OPR/i.test(ua);
+  const isEdge    = /Edg/i.test(ua);
+  const isFirefox = /Firefox/i.test(ua);
+
+  const isPortrait = window.matchMedia
+    ? window.matchMedia('(orientation: portrait)').matches
+    : window.innerHeight > window.innerWidth;
+
+  window.deviceInfo = {
+    isMobile, isTablet, isMobileDevice: isMobile || isTablet, isDesktop: !isMobile && !isTablet,
+    isTouch, isIOS, isAndroid, isMac, isWindows,
+    isWeChat, isQQ, isSafari, isChrome, isEdge, isFirefox,
+    isPortrait, isLandscape: !isPortrait,
+    os: isIOS ? 'ios' : isAndroid ? 'android' : isWindows ? 'windows' : isMac ? 'mac' : 'other',
+    browser: isWeChat ? 'wechat' : isQQ ? 'qq' : isSafari ? 'safari'
+           : isEdge ? 'edge' : isFirefox ? 'firefox' : isChrome ? 'chrome' : 'other',
+    type: isMobile ? 'mobile' : isTablet ? 'tablet' : 'desktop'
+  };
+
+  const root = document.documentElement;
+  root.classList.add('device-' + deviceInfo.type);
+  root.setAttribute('data-device', deviceInfo.type);
+  if (deviceInfo.isTouch)     root.classList.add('device-touch');
+  if (deviceInfo.isIOS)       root.classList.add('device-ios');
+  if (deviceInfo.isAndroid)   root.classList.add('device-android');
+  if (deviceInfo.isWeChat)    root.classList.add('device-wechat');
+  if (deviceInfo.isPortrait)  root.classList.add('device-portrait');
+  else                        root.classList.add('device-landscape');
+
+  console.log('📱 设备识别:', deviceInfo);
+})();
+
+// ================================================================
+// GAME: 海报迷踪 (Poster Puzzle)
+// Rusty Lake inspired point & click puzzle game
+// ================================================================
+
+// ============================================================
+// ② 画布缩放 + 移动端强制横屏（必须放在设备识别之后）
+// ============================================================
+function resizeGame() {
+  const gc = document.getElementById('game-container');
+  // 移动端竖屏时旋转 90° 强制横屏（微信等不跟随设备方向的 webview 也能横屏）
+  const rotated = deviceInfo.isMobileDevice && deviceInfo.isPortrait;
+  let s;
+  if (rotated) {
+    // 旋转后宽高互换：游戏宽 1280 → 视口高，游戏高 720 → 视口宽
+    s = Math.min(window.innerHeight / 1280, window.innerWidth / 720);
+    gc.style.transform = `translate(-50%, -50%) rotate(90deg) scale(${s})`;
+  } else {
+    s = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+    gc.style.transform = `translate(-50%, -50%) scale(${s})`;
+  }
+  gc.classList.toggle('rotated', rotated);
+}
+window.addEventListener('resize', resizeGame);
+resizeGame();
+
+// ============================================================
+// ③ 方向监听 + 横屏锁屏提示（一次性、可关闭、6 秒自动消失）
+// ============================================================
+let landscapeHintDismissed = false;
+let landscapeHintTimer = null;
+
+// 以「实际 viewport 是否横屏」为准，而非按 app 类型判断：
+// 微信/QQ 等不响应旋屏的内置浏览器会一直停在竖屏，isLandscape 恒为 false，自然不触发提示。
+function updateLandscapeHint() {
+  const hint = document.getElementById('landscape-hint');
+  if (!hint) return;
+  const shouldShow = deviceInfo.isMobileDevice && deviceInfo.isLandscape && !landscapeHintDismissed;
+  if (shouldShow && !hint.classList.contains('show')) {
+    hint.classList.add('show');
+    if (landscapeHintTimer) clearTimeout(landscapeHintTimer);
+    landscapeHintTimer = setTimeout(dismissLandscapeHint, 6000);
+  } else if (!shouldShow) {
+    hint.classList.remove('show');
+  }
+}
+
+function dismissLandscapeHint() {
+  landscapeHintDismissed = true;
+  if (landscapeHintTimer) { clearTimeout(landscapeHintTimer); landscapeHintTimer = null; }
+  const hint = document.getElementById('landscape-hint');
+  if (hint) hint.classList.remove('show');
+}
+
+function updateOrientation() {
+  const isPortrait = window.matchMedia
+    ? window.matchMedia('(orientation: portrait)').matches
+    : (window.innerHeight > window.innerWidth);
+
+  deviceInfo.isPortrait = isPortrait;
+  deviceInfo.isLandscape = !isPortrait;
+  const root = document.documentElement;
+  root.classList.toggle('device-portrait', isPortrait);
+  root.classList.toggle('device-landscape', !isPortrait);
+
+  resizeGame(); // 方向变化后重算缩放/旋转
+  updateLandscapeHint();
+}
+window.addEventListener('resize', updateOrientation);
+window.addEventListener('orientationchange', updateOrientation);
+if (window.screen && screen.orientation && screen.orientation.addEventListener) {
+  screen.orientation.addEventListener('change', updateOrientation);
+}
+updateOrientation();
+
+// ---- Constants ----
+const STORAGE_PREFIX = 'posterwall_';
+// 音量设置在所有关卡间共用（与 Demo_Level0 同一对键）
+const VOLUME_PREFIX = 'linkgame_';
+const rooms = ['A', 'B', 'C', 'D'];
+
+// 10 poster designs
+const POSTER_DESIGNS = [
+  { id: '3x4-01', ratio: '3x4', src: 'images/poster-3x4-01.png' },
+  { id: '3x4-02', ratio: '3x4', src: 'images/poster-3x4-02.png' },
+  { id: '3x4-03', ratio: '3x4', src: 'images/poster-3x4-03.png' },
+  { id: '3x4-04', ratio: '3x4', src: 'images/poster-3x4-04.png' },
+  { id: '3x4-05', ratio: '3x4', src: 'images/poster-3x4-05.png' },
+  { id: '4x3-01', ratio: '4x3', src: 'images/poster-4x3-01.png' },
+  { id: '4x3-02', ratio: '4x3', src: 'images/poster-4x3-02.png' },
+  { id: '4x3-03', ratio: '4x3', src: 'images/poster-4x3-03.png' },
+  { id: '4x3-04', ratio: '4x3', src: 'images/poster-4x3-04.png' },
+  { id: '4x3-05', ratio: '4x3', src: 'images/poster-4x3-05.png' },
+];
+
+// Hidden items: { room -> { posterId -> itemId } }
+const HIDDEN_ITEMS = {
+  'B': { '4x3-01': 'luan' },
+  'C': { '3x4-02': 'hua', '3x4-03': 'yan' },
+  'D': { '4x3-04': 'ren', '3x4-05': 'mi' },
+};
+
+// Poster layout per room (positions within room-area 1120×720)
+// Top 3/4 = y: 0-540, Room C right 1/2 = x: 560-1120
+// Display sizes (20% larger): 3x4 → 198×264, 4x3 → 264×198
+const ROOM_POSTERS = {
+  'A': [
+    { posterId: '3x4-01', x: 60,  y: 30,  w: 198, h: 264, z: 10 },
+    { posterId: '4x3-02', x: 210, y: 70,  w: 264, h: 198, z: 11 },
+    { posterId: '3x4-03', x: 400, y: 15,  w: 198, h: 264, z: 12 },
+    { posterId: '4x3-04', x: 130, y: 200, w: 264, h: 198, z: 13 },
+    { posterId: '3x4-05', x: 520, y: 130, w: 198, h: 264, z: 14 },
+    { posterId: '4x3-01', x: 620, y: 260, w: 264, h: 198, z: 15 },
+    { posterId: '3x4-02', x: 680, y: 40,  w: 198, h: 264, z: 16 },
+  ],
+  'B': [
+    { posterId: '3x4-01', x: 80,  y: 50,  w: 198, h: 264, z: 10 },
+    { posterId: '3x4-02', x: 280, y: 100, w: 198, h: 264, z: 11 },
+    { posterId: '4x3-01', x: 480, y: 30,  w: 264, h: 198, z: 12, hasHidden: 'luan' },
+    { posterId: '4x3-03', x: 150, y: 220, w: 264, h: 198, z: 13 },
+    { posterId: '3x4-04', x: 600, y: 200, w: 198, h: 264, z: 14 },
+  ],
+  'C': [
+    { posterId: '3x4-01', x: 600, y: 20,  w: 198, h: 264, z: 10 },
+    { posterId: '4x3-02', x: 750, y: 60,  w: 264, h: 198, z: 11 },
+    { posterId: '3x4-03', x: 680, y: 180, w: 198, h: 264, z: 12, hasHidden: 'yan' },
+    { posterId: '4x3-01', x: 580, y: 290, w: 264, h: 198, z: 13 },
+    { posterId: '3x4-02', x: 850, y: 20,  w: 198, h: 264, z: 14, hasHidden: 'hua' },
+    { posterId: '4x3-04', x: 620, y: 360, w: 264, h: 198, z: 15 },
+    { posterId: '3x4-05', x: 900, y: 200, w: 198, h: 264, z: 16 },
+    { posterId: '4x3-03', x: 730, y: 340, w: 264, h: 198, z: 17 },
+    { posterId: '3x4-04', x: 560, y: 130, w: 198, h: 264, z: 18 },
+    { posterId: '4x3-05', x: 870, y: 370, w: 264, h: 198, z: 19 },
+  ],
+  'D': [
+    { posterId: '3x4-01', x: 30,  y: 20,  w: 198, h: 264, z: 10 },
+    { posterId: '4x3-01', x: 180, y: 50,  w: 264, h: 198, z: 11 },
+    { posterId: '3x4-02', x: 400, y: 10,  w: 198, h: 264, z: 12 },
+    { posterId: '4x3-02', x: 550, y: 70,  w: 264, h: 198, z: 13 },
+    { posterId: '3x4-03', x: 90,  y: 200, w: 198, h: 264, z: 14 },
+    { posterId: '4x3-03', x: 280, y: 230, w: 264, h: 198, z: 15 },
+    { posterId: '3x4-04', x: 500, y: 200, w: 198, h: 264, z: 16 },
+    { posterId: '4x3-04', x: 660, y: 30,  w: 264, h: 198, z: 17, hasHidden: 'ren' },
+    { posterId: '3x4-05', x: 760, y: 220, w: 198, h: 264, z: 18, hasHidden: 'mi' },
+    { posterId: '4x3-05', x: 340, y: 370, w: 264, h: 198, z: 19 },
+    { posterId: '3x4-01', x: 580, y: 370, w: 198, h: 264, z: 20 },
+    { posterId: '4x3-02', x: 820, y: 390, w: 264, h: 198, z: 21 },
+    { posterId: '3x4-02', x: 200, y: 390, w: 198, h: 264, z: 22 },
+    { posterId: '4x3-03', x: 30,  y: 390, w: 264, h: 198, z: 23 },
+    { posterId: '3x4-04', x: 910, y: 20,  w: 198, h: 264, z: 24 },
+  ],
+};
+
+// NPC configs
+const NPC_CONFIGS = {
+  'A': { id: 'npc-oldman', src: 'images/npc-oldman.png', x: 10, y: 250, w: 235, h: 470, speechId: 'speech-npc1' },
+  'B': { id: 'npc-trashcan', src: 'images/npc-trashcan.png', x: 436, y: 472, w: 248, h: 248, speechId: 'speech-npc2' },
+  'C': { id: 'npc-bear', src: 'images/npc-bear.png', x: 10, y: 180, w: 540, h: 540, speechId: 'speech-npc3' },
+  'D': { id: 'npc-mushroom', src: 'images/npc-mushroom.png', x: 428, y: 555, w: 165, h: 165, speechId: 'speech-npc4' },
+};
+
+// Puzzle solution order
+const PUZZLE_SOLUTION = ['luan', 'hua', 'mi', 'ren', 'yan'];
+
+// ---- Game State ----
+const state = {
+  inventory: [],
+  backpack: [],
+  currentRoomIndex: 0,
+  hasNote: false,
+  npc1TalkCount: 0,
+  collectedLuan: false,
+  collectedHua: false,
+  collectedYan: false,
+  collectedRen: false,
+  collectedMi: false,
+  puzzleSolved: false,
+  hasPoetry: false,
+  gameCleared: false,
+  puzzleSlots: [null, null, null, null, null],
+  imageViewerActive: false,
+  currentViewPosterId: null,
+  navEnabled: false,
+};
+
+// ---- Audio ----
+let musicVolume = 0.7, sfxVolume = 0.8;
+let audioCtx = null;
+
+function getAudioCtx() {
+  if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+  return audioCtx;
+}
+
+function playSound(type) {
+  const el = document.getElementById('sfx-' + type);
+  if (el && sfxVolume > 0.01) {
+    const clone = el.cloneNode();
+    clone.volume = sfxVolume;
+    clone.play().catch(() => {});
+  }
+}
+
+function playSuccessJingle() {
+  if (sfxVolume < 0.01) return;
+  try {
+    const ctx = getAudioCtx();
+    const now = ctx.currentTime;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(sfxVolume * 0.4, now);
+    gain.connect(ctx.destination);
+    // Ascending C-E-G-C arpeggio
+    const notes = [523.25, 659.25, 783.99, 1046.50]; // C5 E5 G5 C6
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+      const noteGain = ctx.createGain();
+      const t0 = now + i * 0.12;
+      noteGain.gain.setValueAtTime(0, t0);
+      noteGain.gain.linearRampToValueAtTime(sfxVolume * 0.3, t0 + 0.04);
+      noteGain.gain.linearRampToValueAtTime(0, t0 + 0.35);
+      osc.connect(noteGain);
+      noteGain.connect(gain);
+      osc.start(t0);
+      osc.stop(t0 + 0.4);
+    });
+  } catch (e) { /* silent */ }
+}
+
+function startBgm() {
+  const bgm = document.getElementById('bgm');
+  if (bgm) { bgm.volume = musicVolume; bgm.play().catch(() => {}); }
+}
+
+// ---- Dialog ----
+let dialogTimer = null;
+let speechTimers = {};
+let dialogClickCallback = null;
+
+function showDialog(text, duration) {
+  hideDialog();
+  const box = document.getElementById('dialog-box');
+  box.textContent = text;
+  box.classList.add('visible');
+  playSound('dialog');
+  // 统一：对话框不自动消失，点击对话框范围区域后才消失；显示期间锁定游戏界面
+  document.getElementById('dialog-lock').classList.add('show');
+}
+
+function showDialogPersistent(text, callback) {
+  hideDialog();
+  const box = document.getElementById('dialog-box');
+  box.textContent = text;
+  box.classList.add('visible');
+  box.style.cursor = "url('images/cursor-default.png') 2 2, auto";
+  playSound('dialog');
+  dialogClickCallback = callback;
+  // 统一：对话框不自动消失，点击对话框范围区域后才消失并执行后续
+  document.getElementById('dialog-lock').classList.add('show');
+}
+
+function hideDialog() {
+  if (dialogTimer) { clearTimeout(dialogTimer); dialogTimer = null; }
+  dialogClickCallback = null;
+  const box = document.getElementById('dialog-box');
+  box.classList.remove('visible');
+  box.style.cursor = '';
+  document.getElementById('dialog-lock').classList.remove('show');
+}
+
+// Attach dialog click handler at init time
+function attachDialogClickHandler() {
+  document.getElementById('dialog-box').addEventListener('click', function() {
+    if (dialogClickCallback) {
+      const cb = dialogClickCallback;
+      dialogClickCallback = null;
+      hideDialog();
+      cb();
+    } else {
+      hideDialog();
+    }
+  });
+}
+
+// ---- Inventory ----
+function addItem(id) {
+  const existing = state.inventory.find(i => i.id === id);
+  if (existing) { existing.count++; }
+  else { state.inventory.push({ id, count: 1 }); }
+  renderInventory();
+}
+
+function removeItem(id, count) {
+  const idx = state.inventory.findIndex(i => i.id === id);
+  if (idx < 0) return;
+  if (!count || state.inventory[idx].count <= count) { state.inventory.splice(idx, 1); }
+  else { state.inventory[idx].count -= count; }
+  renderInventory();
+}
+
+function renderInventory() {
+  const inv = document.getElementById('ui-inventory');
+  inv.innerHTML = '';
+  state.inventory.forEach(item => {
+    const slot = document.createElement('div');
+    slot.className = 'inv-slot';
+    const itemDiv = document.createElement('div');
+    itemDiv.className = 'inv-item';
+    itemDiv.setAttribute('data-item-id', item.id);
+    itemDiv.style.backgroundImage = `url('images/item-${item.id}.png')`;
+    itemDiv.addEventListener('mousedown', startManualDrag);
+    itemDiv.addEventListener('touchstart', touchStart, { passive: false });
+    itemDiv.addEventListener('click', function(e) {
+      if (dragState && dragState.started) return;
+      handleItemClick(item.id);
+    });
+    slot.appendChild(itemDiv);
+    if (item.count > 1) {
+      const badge = document.createElement('span');
+      badge.className = 'inv-count';
+      badge.textContent = item.count;
+      slot.appendChild(badge);
+    }
+    inv.appendChild(slot);
+  });
+}
+
+function handleItemClick(itemId) {
+  if (state.imageViewerActive) return;
+  if (itemId === 'note') {
+    openNoteViewer();
+  }
+}
+
+// ---- Backpack ----
+// ---- 返回 Level0（获得通关道具后，左上角出现返回按钮） ----
+const RETURN_LEVEL_NUM = 1;
+const RETURN_ITEM_ID = 'poetry';
+
+function updateReturnBtn() {
+  const btn = document.getElementById('return-btn');
+  if (!btn) return;
+  let has = false;
+  try { const s = JSON.parse(localStorage.getItem('linkgame_backpack') || '[]'); has = s.indexOf(RETURN_ITEM_ID) !== -1; } catch (e) {}
+  btn.style.display = has ? 'flex' : 'none';
+}
+
+function returnToLevel0() {
+  try { localStorage.setItem('linkgame_pendingReturn', String(RETURN_LEVEL_NUM)); } catch (e) {}
+  window.location.href = '../Demo_Level0/index.html';
+}
+
+window.addEventListener('DOMContentLoaded', updateReturnBtn);
+
+function addBackpackItem(id) {
+  if (state.backpack.length >= 9) return;
+  state.backpack.push(id);
+  // 跨关卡同步：把本关道具合并进共享背包键（Demo_Level0 通关检测用）
+  try {
+    const shared = JSON.parse(localStorage.getItem('linkgame_backpack') || '[]');
+    state.backpack.forEach(pid => { if (shared.indexOf(pid) === -1) shared.push(pid); });
+    localStorage.setItem('linkgame_backpack', JSON.stringify(shared));
+  } catch (e) {}
+  updateReturnBtn();
+  renderBackpack();
+  // 获得本关通关物品 → 对话框提示返回地铁站
+  if (id === RETURN_ITEM_ID) showDialog('点击左上角返回地铁站吧！');
+}
+
+function renderBackpack() {
+  const grid = document.getElementById('backpack-grid');
+  if (!grid) return;
+  const items = state.backpack;
+  const slots = grid.querySelectorAll('.bp-slot');
+  slots.forEach((slot, i) => {
+    slot.innerHTML = '';
+    slot.classList.remove('drag-over-target');
+    if (i < items.length) {
+      const itemDiv = document.createElement('div');
+      itemDiv.className = 'bp-item';
+      itemDiv.setAttribute('data-item-id', items[i]);
+      itemDiv.style.backgroundImage = `url('images/item-${items[i]}.png')`;
+      itemDiv.addEventListener('mousedown', startManualDrag);
+      itemDiv.addEventListener('touchstart', touchStart, { passive: false });
+      slot.appendChild(itemDiv);
+    }
+  });
+}
+
+function toggleBackpack() {
+  const overlay = document.getElementById('backpack-overlay');
+  const settingsOverlay = document.getElementById('settings-overlay');
+  if (settingsOverlay.classList.contains('show')) { settingsOverlay.classList.remove('show'); }
+  overlay.classList.toggle('show');
+  if (overlay.classList.contains('show')) { playSound('click'); renderBackpack(); }
+}
+
+// ---- Settings ----
+function toggleSettings() {
+  const overlay = document.getElementById('settings-overlay');
+  const backpackOverlay = document.getElementById('backpack-overlay');
+  if (backpackOverlay.classList.contains('show')) { backpackOverlay.classList.remove('show'); }
+  overlay.classList.toggle('show');
+  if (overlay.classList.contains('show')) playSound('click');
+}
+
+function onMusicVolume(value) {
+  musicVolume = value / 100;
+  document.getElementById('vol-music-label').textContent = value;
+  const bgm = document.getElementById('bgm');
+  if (bgm) bgm.volume = musicVolume;
+  localStorage.setItem(VOLUME_PREFIX + 'music_vol', value);
+}
+
+function onSfxVolume(value) {
+  sfxVolume = value / 100;
+  document.getElementById('vol-sfx-label').textContent = value;
+  localStorage.setItem(VOLUME_PREFIX + 'sfx_vol', value);
+}
+
+function openExternalLink() { playSound('click'); window.open('https://link-project.super.site/', '_blank'); }
+
+function loadSettings() {
+  const mv = localStorage.getItem(VOLUME_PREFIX + 'music_vol');
+  const sv = localStorage.getItem(VOLUME_PREFIX + 'sfx_vol');
+  if (mv !== null) { musicVolume = parseInt(mv) / 100; document.getElementById('vol-music').value = mv; document.getElementById('vol-music-label').textContent = mv; }
+  if (sv !== null) { sfxVolume = parseInt(sv) / 100; document.getElementById('vol-sfx').value = sv; document.getElementById('vol-sfx-label').textContent = sv; }
+}
+
+// ---- Pickup Modal ----
+let pendingPickupItem = null;
+
+function showPickupModal(itemId, itemName) {
+  pendingPickupItem = itemId;
+  document.getElementById('pickup-item-img').style.backgroundImage = `url('images/item-${itemId}.png')`;
+  document.getElementById('pickup-item-name').textContent = itemName;
+  document.getElementById('pickup-overlay').classList.add('visible');
+  playSound('pickup');
+}
+
+function confirmPickup() {
+  const itemId = pendingPickupItem;
+  if (itemId) {
+    if (itemId === 'poetry') {
+      // Poetry goes to backpack, not inventory
+      addBackpackItem(itemId);
+      pendingPickupItem = null;
+      document.getElementById('pickup-overlay').classList.remove('visible');
+      // Game clear: posters disappear, NPC1 gone, no extra dialog
+      state.gameCleared = true;
+      clearAllPosters();
+      renderAllRooms();
+    } else {
+      addItem(itemId);
+      pendingPickupItem = null;
+      document.getElementById('pickup-overlay').classList.remove('visible');
+    }
+  } else {
+    document.getElementById('pickup-overlay').classList.remove('visible');
+  }
+}
+
+// ---- Room Navigation ----
+function changeRoom(dir) {
+  if (!state.navEnabled && state.npc1TalkCount === 0) return;
+  if (state.imageViewerActive) return;
+  if (document.getElementById('puzzle-overlay').classList.contains('visible')) return;
+  if (document.getElementById('pickup-overlay').classList.contains('visible')) return;
+  var newIdx = state.currentRoomIndex + dir;
+  // Cyclic: wrap from D back to A
+  if (newIdx >= rooms.length) newIdx = 0;
+  if (newIdx < 0) newIdx = rooms.length - 1;
+  const oldRoom = document.getElementById('room-' + rooms[state.currentRoomIndex]);
+  if (oldRoom) oldRoom.classList.remove('active-room');
+  state.currentRoomIndex = newIdx;
+  const newRoom = document.getElementById('room-' + rooms[state.currentRoomIndex]);
+  if (newRoom) newRoom.classList.add('active-room');
+  // Immediately clear all dialogs and bubbles on room switch
+  hideDialog();
+  hideAllSpeechBubbles();
+  updateNavVisibility();
+  playSound('nav');
+  if (state.gameCleared) { clearAllPosters(); }
+}
+
+function updateNavVisibility() {
+  if (!state.navEnabled) {
+    document.getElementById('nav-left').classList.remove('visible');
+    document.getElementById('nav-right').classList.remove('visible');
+    return;
+  }
+  // Always show both nav arrows (cyclic navigation)
+  document.getElementById('nav-left').classList.add('visible');
+  document.getElementById('nav-right').classList.add('visible');
+}
+
+// ---- Poster Rendering ----
+function renderPosters(roomName) {
+  if (state.gameCleared) return;
+  const roomEl = document.getElementById('room-' + roomName);
+  if (!roomEl) return;
+  // Remove existing poster entities
+  roomEl.querySelectorAll('.poster-entity').forEach(el => el.remove());
+  const posters = ROOM_POSTERS[roomName];
+  if (!posters) return;
+  posters.forEach(p => {
+    const posterEl = document.createElement('div');
+    posterEl.className = 'entity poster-entity clickable';
+    posterEl.setAttribute('data-poster-id', p.posterId);
+    posterEl.setAttribute('data-room', roomName);
+    posterEl.style.cssText = `
+      position: absolute;
+      left: ${p.x}px; top: ${p.y}px;
+      width: ${p.w}px; height: ${p.h}px;
+      background-image: url('images/poster-${p.posterId}.png');
+      background-size: contain; background-repeat: no-repeat; background-position: center;
+      z-index: ${p.z};
+    `;
+    posterEl.addEventListener('click', function(e) {
+      if (state.imageViewerActive) return;
+      if (dragState && dragState.started) return;
+      // roomA 无隐藏字 / roomB~D 该场景的字已全部找齐：点击直接弹出提示，不再放大显示
+      if (roomItemsAllCollected(roomName)) { showDialog('这里应该没有你要找的，去其他场景看看吧！'); return; }
+      openImageViewer(p.posterId, roomName);
+    });
+    roomEl.appendChild(posterEl);
+  });
+}
+
+function renderNPC(roomName) {
+  const roomEl = document.getElementById('room-' + roomName);
+  if (!roomEl) return;
+  roomEl.querySelectorAll('.npc-entity').forEach(el => el.remove());
+  const cfg = NPC_CONFIGS[roomName];
+  if (!cfg) return;
+  const npcEl = document.createElement('div');
+  npcEl.className = 'entity npc-entity clickable';
+  npcEl.id = 'npc-' + roomName;
+  npcEl.style.cssText = `
+    position: absolute;
+    left: ${cfg.x}px; top: ${cfg.y}px;
+    width: ${cfg.w}px; height: ${cfg.h}px;
+    background-image: url('${cfg.src}');
+    background-size: contain; background-repeat: no-repeat; background-position: center;
+    z-index: 50;
+  `;
+  // NPC1 as drop target when all items collected
+  if (roomName === 'A' && allItemsCollected() && !state.puzzleSolved) {
+    npcEl.setAttribute('data-drop-target', 'npc1');
+  }
+  npcEl.addEventListener('click', function(e) {
+    if (state.imageViewerActive) return;
+    if (dragState && dragState.started) return;
+    handleNPCClick(roomName);
+  });
+  roomEl.appendChild(npcEl);
+}
+
+function renderRoom(roomName) {
+  renderPosters(roomName);
+  renderNPC(roomName);
+}
+
+function renderAllRooms() {
+  rooms.forEach(r => renderRoom(r));
+}
+
+function clearAllPosters() {
+  rooms.forEach(r => {
+    const roomEl = document.getElementById('room-' + r);
+    if (roomEl) roomEl.querySelectorAll('.poster-entity').forEach(el => el.remove());
+  });
+}
+
+// ---- Image Viewer ----
+function openImageViewer(posterId, roomName) {
+  if (state.imageViewerActive) return;
+  state.imageViewerActive = true;
+  playSound('click');
+  state.currentViewPosterId = posterId;
+  const design = POSTER_DESIGNS.find(d => d.id === posterId);
+  const viewer = document.getElementById('image-viewer-overlay');
+  const img = document.getElementById('image-viewer-img');
+  const content = document.getElementById('image-viewer-content');
+  // Clear any previous hidden zones
+  content.querySelectorAll('.hidden-item-zone').forEach(el => el.remove());
+  // Set image
+  img.className = '';
+  if (design.ratio === '3x4') {
+    img.classList.add('poster-3x4');
+  } else {
+    img.classList.add('poster-4x3');
+  }
+  img.style.backgroundImage = `url('images/poster-${posterId}.png')`;
+  // Check for hidden item
+  const hiddenItems = HIDDEN_ITEMS[roomName];
+  if (hiddenItems && hiddenItems[posterId]) {
+    const itemId = hiddenItems[posterId];
+    const collectedKey = 'collected' + itemId.charAt(0).toUpperCase() + itemId.slice(1);
+    if (!state[collectedKey]) {
+      const zone = document.createElement('div');
+      zone.className = 'hidden-item-zone clickable';
+      // Position the hidden zone within the viewer image
+      // For 3x4: image is 314×420, for 4x3: 420×314
+      // Per-item fine-tune offset (dx, dy)
+      const ZONE_OFFSETS = { 'luan': { dx: -25, dy: -15 }, 'hua': { dx: 113, dy: 204 }, 'yan': { dx: 80, dy: -150 }, 'ren': { dx: -130, dy: 80 }, 'mi': { dx: 30, dy: -100 } };
+      const off = ZONE_OFFSETS[itemId] || { dx: 0, dy: 0 };
+      if (design.ratio === '3x4') {
+        zone.style.cssText = 'position:absolute; width:64px; height:36px; left:' + (127 + off.dx) + 'px; top:' + (180 + off.dy) + 'px; background-image:url(images/hidden-zone-' + itemId + '.png); background-size:contain; background-repeat:no-repeat;';
+      } else {
+        zone.style.cssText = 'position:absolute; width:64px; height:36px; left:' + (180 + off.dx) + 'px; top:' + (127 + off.dy) + 'px; background-image:url(images/hidden-zone-' + itemId + '.png); background-size:contain; background-repeat:no-repeat;';
+      }
+      zone.addEventListener('click', function(e) {
+        e.stopPropagation();
+        collectHiddenItem(itemId, collectedKey);
+      });
+      content.appendChild(zone);
+    }
+  }
+  viewer.classList.add('visible');
+}
+
+function closeImageViewer() {
+  const viewer = document.getElementById('image-viewer-overlay');
+  viewer.classList.remove('visible');
+  const content = document.getElementById('image-viewer-content');
+  content.querySelectorAll('.hidden-item-zone').forEach(el => el.remove());
+  state.imageViewerActive = false;
+  state.currentViewPosterId = null;
+}
+
+function openNoteViewer() {
+  if (state.imageViewerActive) return;
+  state.imageViewerActive = true;
+  playSound('click');
+  const viewer = document.getElementById('image-viewer-overlay');
+  const img = document.getElementById('image-viewer-img');
+  img.className = 'note-view';
+  img.style.backgroundImage = "url('images/item-note-expanded.png')";
+  viewer.classList.add('visible');
+}
+
+function collectHiddenItem(itemId, collectedKey) {
+  state[collectedKey] = true;
+  playSound('collect');
+  closeImageViewer();
+  const itemNames = { luan: '乱', hua: '花', yan: '眼', ren: '人', mi: '迷' };
+  const chineseName = itemNames[itemId] || itemId;
+  addItem(itemId);
+  // Re-render the current room's posters to remove the hidden zone
+  renderRoom(rooms[state.currentRoomIndex]);
+  // Re-render room A NPC in case all items are now collected
+  renderNPC('A');
+  // 获得字谜：字符加双引号；集齐 5 个字后接续引导"回去找老伯问问看吧！"
+  setTimeout(() => {
+    if (allItemsCollected() && !state.puzzleSolved) {
+      showDialogPersistent('获得了字符"' + chineseName + '"', function () {
+        showDialog('回去找老伯问问看吧！');
+      });
+    } else {
+      showDialog('获得了字符"' + chineseName + '"', 3000);
+    }
+  }, 300);
+}
+
+// ---- NPC Interactions ----
+function handleNPCClick(roomName) {
+  const speechId = NPC_CONFIGS[roomName].speechId;
+  const speechEl = document.getElementById(speechId);
+  if (!speechEl) return;
+
+  switch (roomName) {
+    case 'A':
+      if (state.gameCleared) {
+        showSpeechBubble(speechEl, 'npc-A', '终于能找着公厕了……');
+      } else {
+        handleNPC1(speechEl);
+      }
+      break;
+    case 'B':
+      showSpeechBubble(speechEl, 'npc-B', state.gameCleared ? '原来墙面是这个样子的。' : '我出现海量文字ptsd了！');
+      break;
+    case 'C':
+      showSpeechBubble(speechEl, 'npc-C', state.gameCleared ? '哇，这里就是小镰仓小涩谷小首尔小济州岛' : '哇这面墙好干净，好出片！');
+      break;
+    case 'D':
+      showSpeechBubble(speechEl, 'npc-D', state.gameCleared ? '头不蓝瘦了！' : '好多字啊我要晕了！');
+      break;
+  }
+}
+
+function handleNPC1(speechEl) {
+  if (state.puzzleSolved && !state.hasPoetry) {
+    // After puzzle solved, give poetry via dialog
+    showDialogPersistent('墙上的海报终于不暴走！快把你的东西收好！', () => {
+      showPickupModal('poetry', '诗集');
+      state.hasPoetry = true;
+    });
+    return;
+  }
+  if (allItemsCollected() && !state.puzzleSolved) {
+    // All items collected, ready for puzzle
+    showDialogPersistent('你好像收集齐了，把小纸条还给我吧！');
+    return;
+  }
+  if (state.npc1TalkCount === 0) {
+    // First encounter — persistent dialog, click to advance
+    showDialogPersistent('怎么墙上多了这么多海报，我都找不到公厕标志了！', () => {
+      // Second dialog, grant note immediately, enable nav after dialog
+      showDialog('你照着这个把墙上被小广告挡住的字找出来！再回来找我', 3000);
+      state.npc1TalkCount = 1;
+      if (!state.hasNote) {
+        state.hasNote = true;
+        addItem('note');
+      }
+      state.navEnabled = true;
+      updateNavVisibility();
+    });
+    return;
+  }
+  // Default: collecting phase
+  showDialog('你照着这个把墙上被小广告挡住的字找出来！再回来找我');
+}
+
+function allItemsCollected() {
+  return state.collectedLuan && state.collectedHua && state.collectedYan && state.collectedRen && state.collectedMi;
+}
+
+// 该场景的隐藏字是否已全部找齐（无隐藏字的场景，如 roomA，视为已找齐）
+function roomItemsAllCollected(roomName) {
+  const hidden = HIDDEN_ITEMS[roomName];
+  if (!hidden) return true;
+  return Object.values(hidden).every(function(itemId) {
+    const key = 'collected' + itemId.charAt(0).toUpperCase() + itemId.slice(1);
+    return state[key];
+  });
+}
+
+function showSpeechBubble(speechEl, npcId, text, callback) {
+  const npcEl = document.getElementById(npcId);
+  if (!npcEl) return;
+  playSound('dialog');
+  const speechId = speechEl.id;
+  if (speechTimers[speechId]) { clearTimeout(speechTimers[speechId]); }
+  speechEl.textContent = text;
+  speechEl.style.display = 'block';
+  speechEl.style.visibility = 'hidden';
+  speechEl.style.top = '0px';
+  speechEl.style.left = '0px';
+  // Measure actual bubble height, then position arrow tip at NPC top edge
+  // Use offsetTop (pre-transform logical coords) — getBoundingClientRect returns
+  // post-scale viewport coords that don't match CSS top in a transformed container.
+  const bubbleH = speechEl.offsetHeight;
+  const npcTop = npcEl.offsetTop;          // logical Y within room-area
+  const npcLeft = npcEl.offsetLeft;        // logical X within room-area
+  const npcW = npcEl.offsetWidth;
+  const relX = npcLeft + npcW / 2;
+  // Arrow (::after) extends 8px below bubble bottom
+  const relY = npcTop - bubbleH - 8;
+  speechEl.style.left = Math.max(30, Math.min(relX - 100, 900)) + 'px';
+  speechEl.style.top = Math.max(5, relY) + 'px';
+  speechEl.style.visibility = 'visible';
+  // Auto-hide
+  speechTimers[speechId] = setTimeout(() => {
+    speechEl.style.display = 'none';
+    delete speechTimers[speechId];
+    if (callback) callback();
+  }, 3000);
+}
+
+function hideAllSpeechBubbles() {
+  Object.keys(speechTimers).forEach(k => { clearTimeout(speechTimers[k]); delete speechTimers[k]; });
+  document.querySelectorAll('.npc-speech').forEach(el => { el.style.display = 'none'; });
+}
+
+// ---- Drop Handler ----
+function handleDrop(itemId, targetId, targetEl) {
+  if (targetId === 'npc1') {
+    if (itemId === 'note' && allItemsCollected() && !state.puzzleSolved) {
+      removeItem('note', 1);
+      state.npc1TalkCount = 2;
+      hideAllSpeechBubbles();
+      hideDialog();
+      setTimeout(() => openPuzzle(), 500);
+    }
+  }
+  // Puzzle slot drops
+  if (targetId && targetId.startsWith('puzzle-slot-')) {
+    const slotIdx = parseInt(targetId.replace('puzzle-slot-', ''));
+    handlePuzzleDrop(itemId, slotIdx);
+  }
+}
+
+// ---- Puzzle System ----
+function openPuzzle() {
+  document.getElementById('puzzle-overlay').classList.add('visible');
+  document.getElementById('puzzle-hint').textContent = '';
+  state.puzzleSlots = [null, null, null, null, null];
+  renderPuzzleSlots();
+}
+
+function closePuzzle() {
+  if (state.puzzleSolved) {
+    document.getElementById('puzzle-overlay').classList.remove('visible');
+    // Re-render NPC1 to remove drop target since puzzle is solved
+    renderNPC('A');
+  }
+}
+
+function handlePuzzleDrop(itemId, slotIdx) {
+  if (state.puzzleSlots[slotIdx] !== null) {
+    // Slot already filled, swap back
+    addItem(state.puzzleSlots[slotIdx]);
+  }
+  // Place item
+  state.puzzleSlots[slotIdx] = itemId;
+  removeItem(itemId, 1);
+  playSound('drop');
+  renderPuzzleSlots();
+  checkPuzzleSolution();
+}
+
+function renderPuzzleSlots() {
+  const slots = document.querySelectorAll('.puzzle-slot');
+  slots.forEach((slot, i) => {
+    // Remove old item
+    slot.querySelectorAll('.puzzle-slot-item').forEach(el => el.remove());
+    slot.classList.remove('filled', 'drag-over-target');
+    slot.setAttribute('data-drop-target', 'puzzle-slot-' + i);
+    if (state.puzzleSlots[i]) {
+      slot.classList.add('filled');
+      const itemDiv = document.createElement('div');
+      itemDiv.className = 'puzzle-slot-item';
+      itemDiv.setAttribute('data-item-id', state.puzzleSlots[i]);
+      itemDiv.style.backgroundImage = `url('images/item-${state.puzzleSlots[i]}.png')`;
+      // Allow removing from slot
+      itemDiv.addEventListener('mousedown', function(e) {
+        e.stopPropagation();
+        const itemId = state.puzzleSlots[i];
+        state.puzzleSlots[i] = null;
+        addItem(itemId);
+        renderPuzzleSlots();
+      });
+      slot.appendChild(itemDiv);
+    }
+  });
+}
+
+function checkPuzzleSolution() {
+  const allFilled = state.puzzleSlots.every(s => s !== null);
+  if (!allFilled) { return; }
+  const correct = state.puzzleSlots.every((item, i) => item === PUZZLE_SOLUTION[i]);
+  if (correct) {
+    state.puzzleSolved = true;
+    playSound('collect');
+    playSuccessJingle();
+    // 字谜完成：自动关闭拼字界面后，自动弹出"墙上海报"提示对话框（点击后弹出诗集）
+    setTimeout(() => {
+      closePuzzle();
+      showDialogPersistent('墙上的海报终于不暴走！快把你的东西收好！', () => {
+        showPickupModal('poetry', '诗集');
+        state.hasPoetry = true;
+      });
+    }, 2000);
+  } else {
+    playSound('nav');
+    // Only return items in wrong positions
+    setTimeout(() => {
+      PUZZLE_SOLUTION.forEach((correctId, i) => {
+        if (state.puzzleSlots[i] && state.puzzleSlots[i] !== correctId) {
+          addItem(state.puzzleSlots[i]);
+          state.puzzleSlots[i] = null;
+        }
+      });
+      renderPuzzleSlots();
+    }, 600);
+  }
+}
+
+// ---- Win System ----
+// Game clear happens directly in confirmPickup() when poetry is collected
+
+// ---- Drag Engine (Manual, per template §5) ----
+let dragCursorFollower = null;
+let dragState = null;
+
+function ensureCursorFollower() {
+  if (!dragCursorFollower) {
+    dragCursorFollower = document.createElement('div');
+    dragCursorFollower.id = 'drag-cursor-follower';
+    dragCursorFollower.style.backgroundImage = "url('images/cursor-grabbing.png')";
+    document.body.appendChild(dragCursorFollower);
+  }
+}
+function removeCursorFollower() { if (dragCursorFollower) { dragCursorFollower.remove(); dragCursorFollower = null; } }
+function cleanupDrag() {
+  if (dragState && dragState.clone) dragState.clone.remove();
+  dragState = null;
+  document.body.classList.remove('dragging');
+  removeCursorFollower();
+  document.querySelectorAll('.drag-over-target').forEach(el => el.classList.remove('drag-over-target'));
+}
+
+function startManualDrag(e) {
+  if (e.button !== 0) return; e.preventDefault();
+  if (state.imageViewerActive) return;
+  const itemEl = e.currentTarget;
+  const itemId = itemEl.getAttribute('data-item-id');
+  if (!itemId) return;
+  const clone = document.createElement('div');
+  clone.style.cssText = `
+    position: fixed; pointer-events: none; z-index: 99998;
+    width: ${itemEl.offsetWidth}px; height: ${itemEl.offsetHeight}px;
+    background-image: ${itemEl.style.backgroundImage};
+    background-size: contain; background-repeat: no-repeat; background-position: center;
+    opacity: 0.85; display: none; transform: translate(-50%, -50%);
+  `;
+  document.body.appendChild(clone);
+  dragState = { itemId, sourceEl: itemEl, startX: e.clientX, startY: e.clientY, started: false, clone };
+}
+
+document.addEventListener('mousemove', function(e) {
+  if (!dragState) return;
+  const dx = e.clientX - dragState.startX, dy = e.clientY - dragState.startY;
+  if (!dragState.started) {
+    if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+    dragState.started = true;
+    document.body.classList.add('dragging');
+    ensureCursorFollower();
+    dragState.clone.style.display = 'block';
+  }
+  dragState.clone.style.left = e.clientX + 'px';
+  dragState.clone.style.top = e.clientY + 'px';
+  if (dragCursorFollower) { dragCursorFollower.style.left = e.clientX + 'px'; dragCursorFollower.style.top = e.clientY + 'px'; }
+  const elUnder = document.elementFromPoint(e.clientX, e.clientY);
+  const dropTarget = elUnder && elUnder.closest && elUnder.closest('[data-drop-target]');
+  document.querySelectorAll('.drag-over-target').forEach(el => { if (el !== dropTarget) el.classList.remove('drag-over-target'); });
+  if (dropTarget && !dropTarget.classList.contains('drag-over-target')) dropTarget.classList.add('drag-over-target');
+});
+
+document.addEventListener('mouseup', function(e) {
+  if (!dragState) return;
+  if (dragState.started) {
+    const elUnder = document.elementFromPoint(e.clientX, e.clientY);
+    const dropTarget = elUnder && elUnder.closest && elUnder.closest('[data-drop-target]');
+    if (dropTarget) handleDrop(dragState.itemId, dropTarget.dataset.dropTarget, dropTarget);
+  }
+  cleanupDrag();
+});
+
+document.getElementById('game-container').addEventListener('mouseleave', () => { if (dragState) cleanupDrag(); });
+
+// ---- Touch Drag ----
+function touchStart(e) {
+  if (e.touches.length !== 1) return;
+  if (state.imageViewerActive) return;
+  const touch = e.touches[0];
+  const itemEl = e.currentTarget;
+  const itemId = itemEl.getAttribute('data-item-id');
+  if (!itemId) return;
+  const clone = document.createElement('div');
+  clone.style.cssText = `
+    position: fixed; pointer-events: none; z-index: 99998;
+    width: ${itemEl.offsetWidth}px; height: ${itemEl.offsetHeight}px;
+    background-image: ${itemEl.style.backgroundImage};
+    background-size: contain; background-repeat: no-repeat; background-position: center;
+    opacity: 0.85; display: block; transform: translate(-50%, -50%);
+    left: ${touch.clientX}px; top: ${touch.clientY}px;
+  `;
+  document.body.appendChild(clone);
+  dragState = { itemId, sourceEl: itemEl, startX: touch.clientX, startY: touch.clientY, started: true, clone };
+  document.body.classList.add('dragging');
+  ensureCursorFollower();
+  if (dragCursorFollower) { dragCursorFollower.style.left = touch.clientX + 'px'; dragCursorFollower.style.top = touch.clientY + 'px'; }
+  e.preventDefault();
+}
+
+document.addEventListener('touchmove', function(e) {
+  if (!dragState || !dragState.started) return;
+  const touch = e.touches[0];
+  dragState.clone.style.left = touch.clientX + 'px';
+  dragState.clone.style.top = touch.clientY + 'px';
+  if (dragCursorFollower) { dragCursorFollower.style.left = touch.clientX + 'px'; dragCursorFollower.style.top = touch.clientY + 'px'; }
+  const elUnder = document.elementFromPoint(touch.clientX, touch.clientY);
+  const dropTarget = elUnder && elUnder.closest && elUnder.closest('[data-drop-target]');
+  document.querySelectorAll('.drag-over-target').forEach(el => { if (el !== dropTarget) el.classList.remove('drag-over-target'); });
+  if (dropTarget && !dropTarget.classList.contains('drag-over-target')) dropTarget.classList.add('drag-over-target');
+}, { passive: false });
+
+document.addEventListener('touchend', function(e) {
+  if (!dragState) return;
+  if (dragState.started) {
+    const touch = e.changedTouches[0];
+    const elUnder = document.elementFromPoint(touch.clientX, touch.clientY);
+    const dropTarget = elUnder && elUnder.closest && elUnder.closest('[data-drop-target]');
+    if (dropTarget) handleDrop(dragState.itemId, dropTarget.dataset.dropTarget, dropTarget);
+  }
+  cleanupDrag();
+});
+
+// ---- Inventory Scroll Drag ----
+(function initInventoryScroll() {
+  const inv = document.getElementById('ui-inventory');
+  let isDragging = false, startY = 0, scrollTop = 0;
+  inv.addEventListener('mousedown', function(ev) {
+    if (ev.target.classList.contains('inv-item')) return;
+    isDragging = true; startY = ev.clientY; scrollTop = inv.scrollTop;
+    inv.style.cursor = "url('images/cursor-grabbing.png') 16 16, grabbing";
+    ev.preventDefault();
+  });
+  document.addEventListener('mousemove', function(ev) {
+    if (!isDragging) return;
+    inv.scrollTop = scrollTop - (ev.clientY - startY) * 1.5;
+  });
+  document.addEventListener('mouseup', function() { isDragging = false; inv.style.cursor = ''; });
+  inv.addEventListener('mouseleave', function() { isDragging = false; inv.style.cursor = ''; });
+})();
+
+// ---- Initialization ----
+function initGame() {
+  loadSettings();
+  attachDialogClickHandler();
+  updateNavVisibility();
+  renderInventory();
+  renderAllRooms();
+  // Start BGM on first interaction
+  const startBgmOnInteract = function() {
+    if (musicVolume > 0.01) startBgm();
+    document.removeEventListener('click', startBgmOnInteract);
+    document.removeEventListener('touchstart', startBgmOnInteract);
+  };
+  document.addEventListener('click', startBgmOnInteract);
+  document.addEventListener('touchstart', startBgmOnInteract);
+  console.log('🎮 丰施街区 — Rusty Lake inspired point & click game');
+  console.log('  Room A: Find the old man, get the note');
+  console.log('  Rooms B/C/D: Find hidden characters in posters');
+  console.log('  Return to Room A: Arrange characters to solve the puzzle');
+
+  // 横屏提示（事件绑定放在初始化函数末尾）
+  document.getElementById('landscape-hint').addEventListener('click', function (e) { if (e.target === e.currentTarget) dismissLandscapeHint(); });
+  document.getElementById('landscape-hint-close').addEventListener('click', dismissLandscapeHint);
+}
+
+window.addEventListener('DOMContentLoaded', initGame);
+</script>
+</body>
+</html>
