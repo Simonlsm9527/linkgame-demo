@@ -1,0 +1,2084 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>华旺发商城</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0a0a0a; overflow: hidden;
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    width: 100vw; height: 100vh;
+    user-select: none; -webkit-user-select: none;
+  }
+  #game-container {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%); transform-origin: center center;
+    display: flex; flex-direction: row;
+    width: 1280px; height: 720px;
+    background: #222; overflow: hidden;
+    box-shadow: 0 0 20px rgba(0,0,0,0.8);
+    cursor: url('images/cursor-default.png') 2 2, auto;
+  }
+
+  /* ===== 区域划分 ===== */
+  #room-area { width: 1120px; height: 720px; position: relative; overflow: hidden; background: #333; }
+  #ui-inventory {
+    width: 160px; height: 720px;
+    background-image: url('images/ui-inventory-bg.png'); background-size: cover;
+    border-left: 2px solid #000;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 15px 0; gap: 15px;
+    overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none;
+  }
+  #ui-inventory::-webkit-scrollbar { display: none; }
+
+  /* ===== 房间系统 ===== */
+  .room { display: none; position: absolute; top: 0; left: 0;
+    width: 1120px; height: 720px;
+    background-size: cover; background-position: center; background-repeat: no-repeat; }
+  .room.active-room { display: block; }
+  #room-A { background-image: url('images/room-A-bg.png'); }
+  #room-B { background-image: url('images/room-B-bg.png'); }
+
+  /* ===== 实体基类 ===== */
+  .entity {
+    position: absolute;
+    background-size: contain; background-repeat: no-repeat; background-position: center;
+  }
+  .clickable { transition: filter 0.2s; }
+  .clickable:hover { filter: brightness(1.2); }
+
+  /* ===== NPC1（房间A 右侧） ===== */
+  #entity-npc1 { left: 547px; top: 174px; width: 546px; height: 546px; z-index: 60;
+    background-image: url('images/npc-1.png'); }
+
+  /* ===== 迷宫区域（房间B） — 吃豆人风格 ===== */
+  /* 背景图层（位于迷宫墙体图层之下，本地美术 maze-bg.png） */
+  #maze-bg {
+    position: absolute; left: 60px; top: 60px;
+    width: 1000px; height: 600px;
+    background-image: url('images/maze-bg.png');
+    background-size: 100% 100%;
+    z-index: 3;
+  }
+  #maze {
+    position: absolute; left: 60px; top: 60px;
+    width: 1000px; height: 600px;
+    z-index: 5;
+  }
+  /* 吃豆人式墙体：每一格替换为 1:1 本地便签美术（三种样式随机分布） */
+  .maze-wall {
+    position: absolute; width: 40px; height: 40px;
+    background-color: transparent;
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    background-position: center;
+  }
+  .maze-wall.wall-1 { background-image: url('images/stickynote-1.png'); }
+  .maze-wall.wall-2 { background-image: url('images/stickynote-2.png'); }
+  .maze-wall.wall-3 { background-image: url('images/stickynote-3.png'); }
+  /* 入口 / 出口：1:1 方形本地美术资产 */
+  .maze-zone {
+    position: absolute; width: 40px; height: 40px; z-index: 40;
+    background-size: contain; background-repeat: no-repeat; background-position: center;
+    pointer-events: none;
+  }
+  #maze-entrance { background-image: url('images/maze-entrance.png'); }
+  #maze-exit { background-image: url('images/maze-exit.png'); }
+
+  /* 迷宫 NPC 实体（含发光收集物） */
+  .maze-npc { width: 40px; height: 40px; z-index: 70; }
+  /* 可捡拾道具的紫色发光光圈（只有 4 个收集物会带 .npc-halo） */
+  .npc-halo {
+    position: absolute; inset: -9px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(200,120,255,0.9) 0%, rgba(178,85,255,0.35) 45%, rgba(178,85,255,0) 75%);
+    animation: haloPulse 1.4s ease-in-out infinite;
+  }
+  @keyframes haloPulse { 0%,100% { opacity: .75; transform: scale(1); } 50% { opacity: 1; transform: scale(1.1); } }
+  .npc-sprite {
+    position: absolute; inset: 5px;
+    background-size: contain; background-position: center; background-repeat: no-repeat;
+  }
+
+  /* ===== 玩家（房间B） ===== */
+  #entity-player { left: 0; top: 0; width: 32px; height: 32px; z-index: 80; display: none; will-change: transform;
+    pointer-events: none;   /* 玩家图层不拦截点击，避免站在 NPC 上时点不到它的描述窗口 */
+    /* 白色边缘发光：drop-shadow 跟随人物剪影轮廓，只向外溢光，不会给 32×32 的方框染色 */
+    filter: drop-shadow(0 0 4px rgba(255,255,255,0.95)) drop-shadow(0 0 10px rgba(255,255,255,0.7)); }
+  /* 第一次进入迷宫时的强化白光：比常规更亮、更大，3 秒后由 enterRoom 里的定时器移除该类 */
+  #entity-player.first-glow {
+    filter: drop-shadow(0 0 7px rgba(255,255,255,1)) drop-shadow(0 0 18px rgba(255,255,255,0.95)) drop-shadow(0 0 36px rgba(255,255,255,0.8)); }
+  /* 受伤时仍保持原有的红色闪烁（会暂时覆盖白色发光 350ms） */
+  #entity-player.hurt { filter: brightness(1.8) drop-shadow(0 0 14px rgba(255,45,45,0.95)); }
+
+  /* ===== 血量显示（左上角） ===== */
+  #hp-display {
+    position: absolute; top: 12px; left: 12px; z-index: 120;
+    display: flex; align-items: center; gap: 8px;
+    background: rgba(0,0,0,0.6); border: 2px solid rgba(255,255,255,0.35);
+    border-radius: 12px; padding: 6px 14px;
+    font-size: 20px; font-weight: bold; color: #fff;
+    user-select: none; pointer-events: none;
+  }
+  #hp-display .hp-label { color: #bbb; font-size: 15px; }
+  #hp-num { color: #ffd700; min-width: 26px; text-align: center; }
+  #hp-display.low #hp-num { color: #ff4d6d; animation: hpBlink 0.8s infinite; }
+  @keyframes hpBlink { 50% { opacity: 0.3; } }
+
+  /* ===== 对话框 ===== */
+  #dialog-box {
+    position: absolute; bottom: 40px; left: 160px;
+    width: 800px; min-height: 70px;
+    background: rgba(255,255,255,0.95); border: 3px solid #333; border-radius: 15px;
+    color: #000; font-size: 20px; line-height: 1.7;
+    padding: 20px; z-index: 10001; display: none;
+    text-align: center; box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+    cursor: url('images/cursor-default.png') 2 2, auto;
+  }
+  #dialog-box.visible { display: block; animation: dialogIn 0.35s ease-out; }
+  @keyframes dialogIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* ===== 对话框模态锁：对话框显示期间锁定整个游戏界面，仅对话框本身可点击 ===== */
+  #dialog-lock {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    z-index: 10000; display: none;
+  }
+  #dialog-lock.show { display: block; }
+
+  /* ===== 对话气泡 ===== */
+  .speech-bubble {
+    position: absolute;
+    background: rgba(30, 20, 40, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+    color: #ccc;
+    font-size: 20px;
+    padding: 8px 20px;
+    z-index: 190;
+    display: none;
+    white-space: nowrap;
+  }
+  .speech-bubble::after {
+    content: '';
+    position: absolute;
+    bottom: -8px; left: 50%;
+    transform: translateX(-50%);
+    width: 0; height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-top: 8px solid rgba(30, 20, 40, 0.9);
+  }
+  .speech-bubble.show { display: block; animation: bubbleIn 0.2s ease-out; }
+  @keyframes bubbleIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ===== 导航按钮 ===== */
+  .nav-btn {
+    position: absolute; top: 335px;
+    width: 50px; height: 60px;
+    background-size: contain; background-repeat: no-repeat; background-position: center;
+    z-index: 150; opacity: 0.7; transition: opacity 0.3s, transform 0.2s; display: none;
+  }
+  .nav-btn:hover { filter: brightness(1.2); }
+  .nav-btn.visible { display: block; }
+  #nav-left  { left: 12px;  background-image: url('images/nav-left.png'); }
+  #nav-right { right: 12px; background-image: url('images/nav-right.png'); }
+
+  /* ===== 物品栏 ===== */
+  .inv-slot { width: 120px; height: 120px; background: rgba(0,0,0,0.3);
+    border-radius: 5px; flex-shrink: 0; position: relative;
+    display: flex; align-items: center; justify-content: center; }
+  .inv-item {
+    width: 100%; height: 100%;
+    background-size: contain; background-repeat: no-repeat; background-position: center;
+    border-radius: 3px;
+    cursor: url('images/cursor-grab.png') 16 16, grab;
+  }
+  .inv-count {
+    position: absolute; bottom: 5px; right: 8px;
+    background: rgba(0,0,0,0.7); color: #ffd700;
+    font-size: 14px; font-weight: bold;
+    padding: 1px 6px; border-radius: 8px; pointer-events: none;
+  }
+
+  /* ===== 设置按钮 & 面板 ===== */
+  #settings-btn {
+    position: absolute;
+    top: 12px;
+    right: 172px;
+    width: 42px; height: 42px;
+    z-index: 300;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.55);
+    border: 2px solid rgba(255,255,255,0.35);
+    display: flex; justify-content: center; align-items: center;
+    transition: all 0.25s ease;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  #settings-btn:hover {
+    background: rgba(0,0,0,0.75);
+    border-color: rgba(255,255,255,0.6);
+    transform: rotate(30deg);
+  }
+  #settings-btn svg { width: 24px; height: 24px; fill: rgba(255,255,255,0.85); }
+  #settings-overlay {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    z-index: 400; display: none;
+    align-items: center; justify-content: center;
+  }
+  #settings-overlay.show { display: flex; }
+  #settings-panel {
+    position: relative; width: 400px;
+    background: rgba(20, 20, 30, 0.92);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 16px;
+    padding: 32px 36px 28px;
+    color: #e0e0e0;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+    font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    pointer-events: auto; box-sizing: border-box;
+  }
+  #settings-panel h3 { text-align: center; margin-bottom: 24px; font-size: 22px; font-weight: 500; letter-spacing: 2px; color: #fff; }
+  #settings-close-btn {
+    position: absolute; top: 10px; right: 16px;
+    width: 32px; height: 32px;
+    background: none; border: none;
+    color: #999; font-size: 24px;
+    transition: color 0.2s;
+    line-height: 32px; text-align: center; padding: 0;
+  }
+  #settings-close-btn:hover { color: #fff; }
+  .setting-row { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+  .vol-icon { width: 22px; height: 22px; opacity: 0.7; flex-shrink: 0; }
+  .vol-label { width: 56px; text-align: right; font-size: 15px; color: #bbb; flex-shrink: 0; }
+  .setting-row input[type="range"] {
+    flex: 1; height: 6px;
+    -webkit-appearance: none; appearance: none;
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 3px; outline: none;
+  }
+  .setting-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #fff; border: 2px solid #888;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    transition: transform 0.15s ease;
+  }
+  .setting-row input[type="range"]::-webkit-slider-thumb:hover { filter: brightness(1.2); }
+  .setting-row input[type="range"]::-moz-range-thumb {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #fff; border: 2px solid #888;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  }
+  .setting-row input[type="range"]::-moz-range-thumb:hover { filter: brightness(1.2); }
+  .vol-value { width: 36px; text-align: center; font-size: 14px; color: #aaa; flex-shrink: 0; }
+  #settings-link-btn {
+    width: 100%; margin-top: 24px; padding: 12px 0;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 10px; color: #ddd;
+    font-size: 16px; letter-spacing: 1px;
+    text-align: center; transition: all 0.2s ease;
+  }
+  #settings-link-btn:hover { background: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.45); color: #fff; }
+
+  /* ===== 背包按钮 & 面板 ===== */
+  #backpack-btn {
+    position: absolute;
+    top: 12px;
+    left: 1016px;
+    width: 42px; height: 42px;
+    background: rgba(0,0,0,0.55);
+    border: 2px solid rgba(255,255,255,0.35);
+    border-radius: 50%;
+    z-index: 300;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.25s ease;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  #backpack-btn:hover { background: rgba(0,0,0,0.75); border-color: rgba(255,255,255,0.6); }
+  #backpack-btn svg { width: 24px; height: 24px; fill: rgba(255,255,255,0.85); }
+  #backpack-overlay {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    z-index: 400; display: none;
+    align-items: center; justify-content: center;
+  }
+  #backpack-overlay.show { display: flex; }
+  #backpack-panel {
+    position: relative; width: 380px;
+    background: rgba(20, 20, 30, 0.92);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 16px;
+    padding: 32px 36px 28px;
+    color: #e0e0e0;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+    font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    pointer-events: auto; box-sizing: border-box;
+  }
+  #backpack-panel h3 { text-align: center; margin-bottom: 24px; font-size: 22px; font-weight: 500; letter-spacing: 2px; color: #fff; }
+  #backpack-close-btn {
+    position: absolute; top: 10px; right: 16px;
+    width: 32px; height: 32px;
+    background: none; border: none;
+    color: #999; font-size: 24px;
+    transition: color 0.2s;
+    line-height: 32px; text-align: center; padding: 0;
+  }
+  #backpack-close-btn:hover { color: #fff; }
+  #backpack-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .bp-slot {
+    width: 100px; height: 100px; background: rgba(0,0,0,0.3);
+    border-radius: 6px; display: flex; align-items: center; justify-content: center;
+  }
+  .bp-item {
+    width: 90px; height: 90px;
+    background-size: contain; background-repeat: no-repeat; background-position: center;
+    cursor: url('images/cursor-grab.png') 16 16, grab;
+  }
+
+  /* ===== 道具拾取弹窗 ===== */
+  #pickup-overlay {
+    position: absolute; top: 0; left: 0;
+    width: 1120px; height: 720px;
+    background: rgba(0,0,0,0.7); z-index: 350; display: none;
+    align-items: center; justify-content: center;
+  }
+  #pickup-overlay.visible { display: flex; }
+  #pickup-panel {
+    background: #1a1a2e; border: 2px solid #555; border-radius: 16px;
+    padding: 30px 40px; width: 300px; color: #fff;
+    text-align: center;
+  }
+  #pickup-panel h3 { margin-bottom: 20px; font-size: 20px; letter-spacing: 2px; }
+  #pickup-item-img {
+    width: 100px; height: 100px;
+    background-size: contain; background-repeat: no-repeat; background-position: center;
+    margin: 0 auto 12px;
+  }
+  #pickup-item-name { font-size: 16px; color: #ccc; margin-bottom: 24px; }
+  #pickup-confirm-btn {
+    padding: 10px 40px;
+    border: none; border-radius: 8px;
+    background: #d4a017;
+    color: #fff; font-size: 15px; cursor: url('images/cursor-default.png') 2 2, auto; letter-spacing: 2px;
+  }
+  #pickup-confirm-btn:hover { filter: brightness(1.2); }
+
+  /* ===== 物品描述窗口（面板样式参考 Level4 拼图/扫雷的问号提示窗） ===== */
+  #item-desc-overlay {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    z-index: 400; display: none;
+    align-items: center; justify-content: center;
+  }
+  #item-desc-overlay.show { display: flex; }
+  #item-desc-panel {
+    position: relative; width: 660px;
+    background: rgba(20, 20, 30, 0.92);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 16px;
+    padding: 32px 36px 28px;
+    color: #e0e0e0;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+    font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    pointer-events: auto; box-sizing: border-box;
+  }
+  /* 标题：左对齐，字号（22px）大于描述正文（17px） */
+  #item-desc-title {
+    text-align: left; margin-bottom: 20px;
+    font-size: 22px; font-weight: 500; letter-spacing: 2px; color: #fff;
+  }
+  /* 图文区：左侧物品图片 + 右侧（标题 + 正文）
+     gap 38px = 面板边框 2px + 左内边距 36px，使"图片右缘→文字左缘"的间距
+     等于"图片左缘→窗口左缘"的留白，图片左右两侧空白对称 */
+  #item-desc-body { display: flex; align-items: stretch; gap: 38px; }
+  /* 图片框：透明背景（直接透出图片自身的透明通道），高度拉伸到与右侧标题+正文整体等高 */
+  #item-desc-figure { flex: 0 0 auto; align-self: stretch; display: flex; align-items: flex-start; }
+  #item-desc-img { display: block; height: 100%; width: auto; }
+  /* 右列：标题在上、正文在下（同一列内，标题左缘自然与正文左缘对齐） */
+  #item-desc-main { flex: 1 1 auto; display: flex; flex-direction: column; }
+  #item-desc-text { flex: 1 1 auto; font-size: 17px; line-height: 1.9; color: #ddd; word-break: break-word; }
+  #item-desc-close-btn {
+    position: absolute; top: 10px; right: 16px;
+    width: 32px; height: 32px;
+    background: none; border: none;
+    color: #999; font-size: 24px;
+    transition: color 0.2s;
+    line-height: 32px; text-align: center; padding: 0;
+  }
+  #item-desc-close-btn:hover { color: #fff; }
+
+  /* ===== 虚拟摇杆（移动端） ===== */
+  #joystick {
+    position: absolute; left: 36px; bottom: 36px;
+    width: 150px; height: 150px; border-radius: 50%;
+    background: rgba(255,255,255,0.10);
+    border: 3px solid rgba(255,255,255,0.35);
+    z-index: 180; display: none; touch-action: none;
+    will-change: transform;
+  }
+  #joystick-knob {
+    position: absolute; left: 50%; top: 50%;
+    width: 64px; height: 64px; margin-left: -32px; margin-top: -32px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.45);
+    will-change: transform;
+  }
+
+  /* ===== 横屏提示遮罩 ===== */
+  #landscape-hint {
+    position: fixed; inset: 0;
+    background: #0a0a0a;
+    z-index: 100000;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+    color: #fff;
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    text-align: center;
+    user-select: none; -webkit-user-select: none;
+  }
+  #landscape-hint.show { display: flex; }
+  #landscape-hint-icon { width: 76px; height: 76px; animation: hintLockPulse 1.8s ease-in-out infinite; }
+  @keyframes hintLockPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+  #landscape-hint p { font-size: 18px; letter-spacing: 2px; opacity: 0.85; }
+  #landscape-hint .hint-sub { font-size: 13px; opacity: 0.5; letter-spacing: 1px; }
+  #landscape-hint-close {
+    margin-top: 8px;
+    padding: 10px 40px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 24px;
+    color: #ddd;
+    font-size: 15px;
+    letter-spacing: 2px;
+    cursor: url('images/cursor-default.png') 2 2, auto;
+    transition: background 0.2s, color 0.2s;
+  }
+  #landscape-hint-close:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  /* ===== 自定义鼠标指针系统 ===== */
+  /* 统一：原生控件（<button>、滑块等）不继承自定义指针，这里显式指定 */
+  button, input[type="range"] { cursor: url('images/cursor-default.png') 2 2, auto; }
+  .inv-item { cursor: url('images/cursor-grab.png') 16 16, grab; }
+  html.dragging, body.dragging, body.dragging * { cursor: none !important; }
+  #drag-cursor-follower {
+    position: fixed; pointer-events: none; z-index: 99999;
+    width: 32px; height: 32px;
+    background-size: contain; background-repeat: no-repeat; background-position: center;
+    transform: translate(-16px, -16px);
+  }
+  body.dragging .drag-over-target { filter: brightness(1.3) drop-shadow(0 0 6px cyan); }
+#return-btn {
+  position: absolute;
+  top: 12px; left: 12px;
+  width: 42px; height: 42px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  z-index: 300;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+#return-btn:hover { background: rgba(0, 0, 0, 0.75); border-color: rgba(255, 255, 255, 0.6); }
+#return-btn svg { width: 24px; height: 24px; fill: rgba(255, 255, 255, 0.85); }
+</style>
+</head>
+<body>
+
+<!-- 音频（放在 body 最前面） -->
+<audio id="bgm" src="audio/bgm.wav" loop preload="none"></audio>
+<audio id="sfx-click"   src="audio/sfx-click.wav"   preload="auto"></audio>
+<audio id="sfx-nav"     src="audio/sfx-nav.wav"     preload="auto"></audio>
+<audio id="sfx-dialog"  src="audio/sfx-dialog.wav"  preload="auto"></audio>
+<audio id="sfx-collect" src="audio/sfx-collect.wav" preload="auto"></audio>
+<audio id="sfx-pickup"  src="audio/sfx-pickup.wav"  preload="auto"></audio>
+<audio id="sfx-drop"    src="audio/sfx-drop.wav"    preload="auto"></audio>
+<audio id="sfx-fail"    src="audio/sfx-fail.wav"    preload="auto"></audio>
+<audio id="sfx-success" src="audio/sfx-success.wav" preload="auto"></audio>
+<audio id="sfx-hit"     src="audio/sfx-hit.wav"     preload="auto"></audio>
+
+<!-- 游戏容器（唯一顶层） -->
+<div id="game-container">
+
+  <!-- 场景区域 1120×720 -->
+  <div id="room-area">
+
+    <!-- 房间A：NPC1 默认界面 -->
+    <div id="room-A" class="room active-room">
+      <!-- 实体用 .entity，可交互加 .clickable，接受拖放加 data-drop-target -->
+      <div id="entity-npc1" class="entity clickable"></div>
+    </div>
+
+    <!-- 房间B：吃豆人迷宫 -->
+    <div id="room-B" class="room">
+      <div id="maze-bg"></div>
+      <div id="maze"></div>
+      <div id="maze-entrance" class="maze-zone"></div>
+      <div id="maze-exit" class="maze-zone"></div>
+      <div id="entity-player" class="entity"></div>
+      <div id="hp-display"><span class="hp-label">HP</span><b id="hp-num">10</b></div>
+    </div>
+
+    <!-- 对话框（底部中央，用于正式对话） -->
+    <div id="dialog-box"></div>
+
+    <!-- 对话气泡（NPC6/7/8 的气泡由 JS 动态创建） -->
+
+    <!-- 导航箭头（roomB 无导航 UI，仅 roomA 使用向右箭头） -->
+    <div id="nav-left" class="nav-btn" onclick="changeRoom(-1)"></div>
+    <div id="nav-right" class="nav-btn" onclick="changeRoom(1)"></div>
+
+    <!-- Virtual Joystick (mobile) -->
+    <div id="joystick">
+      <div id="joystick-knob"></div>
+    </div>
+  </div>
+
+  <!-- 物品栏 160×720 -->
+  <div id="ui-inventory"></div>
+
+  <!-- 对话框模态锁（对话框显示期间锁定界面，仅对话框本身可点击） -->
+  <div id="dialog-lock"></div>
+
+  <!-- 背包按钮 -->
+  <div id="backpack-btn" onclick="toggleBackpack()" style="display:none">
+    <svg viewBox="0 0 24 24"><path d="M20 6h-4V4c0-1.1-.9-2-2-2h-4c-1.1 0-2 .9-2 2v2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zM10 4h4v2h-4V4zm10 16H4V8h16v12z"/><path d="M9 12h2v2H9zm4 0h2v2h-2z"/></svg>
+  </div>
+
+  <!-- 设置按钮 -->
+    <!-- 返回 Level0 -->
+  <div id="return-btn" onclick="returnToLevel0()">
+    <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+  </div>
+<div id="settings-btn" onclick="toggleSettings()">
+    <svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
+  </div>
+
+  <!-- 设置覆盖层 -->
+  <div id="settings-overlay" onclick="if(event.target===this)toggleSettings()">
+    <div id="settings-panel" onclick="event.stopPropagation()">
+      <button id="settings-close-btn" onclick="toggleSettings()">&times;</button>
+      <h3>设 置</h3>
+      <div class="setting-row">
+        <svg class="vol-icon" viewBox="0 0 24 24" fill="rgba(255,255,255,0.7)"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+        <span class="vol-label">音乐</span>
+        <input type="range" id="vol-music" min="0" max="100" value="70" oninput="onMusicVolume(this.value)">
+        <span class="vol-value" id="vol-music-label">70</span>
+      </div>
+      <div class="setting-row">
+        <svg class="vol-icon" viewBox="0 0 24 24" fill="rgba(255,255,255,0.7)"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+        <span class="vol-label">音效</span>
+        <input type="range" id="vol-sfx" min="0" max="100" value="80" oninput="onSfxVolume(this.value)">
+        <span class="vol-value" id="vol-sfx-label">80</span>
+      </div>
+      <button id="settings-link-btn" onclick="openExternalLink()">查看更多内容 →</button>
+    </div>
+  </div>
+
+  <!-- 背包覆盖层 -->
+  <div id="backpack-overlay" onclick="if(event.target===this)toggleBackpack()">
+    <div id="backpack-panel" onclick="event.stopPropagation()">
+      <button id="backpack-close-btn" onclick="toggleBackpack()">&times;</button>
+      <h3>背 包</h3>
+      <div id="backpack-grid">
+        <div class="bp-slot"></div><div class="bp-slot"></div><div class="bp-slot"></div>
+        <div class="bp-slot"></div><div class="bp-slot"></div><div class="bp-slot"></div>
+        <div class="bp-slot"></div><div class="bp-slot"></div><div class="bp-slot"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 道具拾取弹窗（严格模态：无关闭按钮、不可点击外部关闭、不自动消失、确认后才入包） -->
+  <div id="pickup-overlay">
+    <div id="pickup-panel">
+      <h3>已回收至背包</h3>
+      <div id="pickup-item-img"></div>
+      <div id="pickup-item-name"></div>
+      <button id="pickup-confirm-btn" onclick="confirmPickup()">确 认</button>
+    </div>
+  </div>
+
+  <!-- 物品描述窗口（点击迷宫内物品 / 道具栏道具弹出；点击窗口外区域或关闭键消失） -->
+  <div id="item-desc-overlay" onclick="if(event.target===this)closeItemDesc()">
+    <div id="item-desc-panel" onclick="event.stopPropagation()">
+      <button id="item-desc-close-btn" onclick="closeItemDesc()">&times;</button>
+      <div id="item-desc-body">
+        <div id="item-desc-figure"><img id="item-desc-img" alt=""></div>
+        <div id="item-desc-main">
+          <h3 id="item-desc-title"></h3>
+          <div id="item-desc-text"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- 横屏提示：建议锁定旋屏（一次性、可关闭、6 秒自动消失） -->
+<div id="landscape-hint">
+  <svg id="landscape-hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+  </svg>
+  <p>建议锁定竖屏再把手机横过来</p>
+  <p class="hint-sub">游玩体验更佳</p>
+  <button id="landscape-hint-close">知道了</button>
+</div>
+
+<script>
+// ============================================================
+// ① 设备识别（必须放在 <script> 最顶部，先于 resizeGame()）
+// ============================================================
+(function detectDevice() {
+  const ua = navigator.userAgent;
+  const isIOS     = /iPhone|iPad|iPod/i.test(ua);
+  const isAndroid = /Android/i.test(ua);
+  const isMac     = /Mac/i.test(ua) && !isIOS;
+  const isWindows = /Windows/i.test(ua);
+  const isTablet   = /iPad/i.test(ua) || (isAndroid && !/Mobile/i.test(ua));
+  const isMobileUA = /Mobi|Android|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  const isTouch    = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  const coarsePtr  = window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : false;
+  const noHover    = window.matchMedia ? window.matchMedia('(hover: none)').matches : false;
+  const isTouchPrimary = coarsePtr && noHover;
+  const isMobile   = isMobileUA || isTouchPrimary;
+  const isWeChat  = /MicroMessenger/i.test(ua);
+  const isQQ      = /QQ\//i.test(ua);
+  const isSafari  = /Safari/i.test(ua) && !/Chrome|CriOS|Edg|OPR/i.test(ua);
+  const isChrome  = /Chrome|CriOS/i.test(ua) && !/Edg|OPR/i.test(ua);
+  const isEdge    = /Edg/i.test(ua);
+  const isFirefox = /Firefox/i.test(ua);
+  const isPortrait = window.matchMedia
+    ? window.matchMedia('(orientation: portrait)').matches
+    : window.innerHeight > window.innerWidth;
+
+  window.deviceInfo = {
+    isMobile, isTablet, isMobileDevice: isMobile || isTablet, isDesktop: !isMobile && !isTablet,
+    isTouch, isIOS, isAndroid, isMac, isWindows,
+    isWeChat, isQQ, isSafari, isChrome, isEdge, isFirefox,
+    isPortrait, isLandscape: !isPortrait,
+    os: isIOS ? 'ios' : isAndroid ? 'android' : isWindows ? 'windows' : isMac ? 'mac' : 'other',
+    browser: isWeChat ? 'wechat' : isQQ ? 'qq' : isSafari ? 'safari'
+           : isEdge ? 'edge' : isFirefox ? 'firefox' : isChrome ? 'chrome' : 'other',
+    type: isMobile ? 'mobile' : isTablet ? 'tablet' : 'desktop'
+  };
+
+  const root = document.documentElement;
+  root.classList.add('device-' + deviceInfo.type);
+  root.setAttribute('data-device', deviceInfo.type);
+  if (deviceInfo.isTouch)     root.classList.add('device-touch');
+  if (deviceInfo.isIOS)       root.classList.add('device-ios');
+  if (deviceInfo.isAndroid)   root.classList.add('device-android');
+  if (deviceInfo.isWeChat)    root.classList.add('device-wechat');
+  if (deviceInfo.isPortrait)  root.classList.add('device-portrait');
+  else                        root.classList.add('device-landscape');
+
+  console.log('📱 设备识别:', deviceInfo);
+})();
+
+// ============================================================
+// ② 画布缩放 + 移动端强制横屏
+// ============================================================
+function resizeGame() {
+  const gc = document.getElementById('game-container');
+  const rotated = deviceInfo.isMobileDevice && deviceInfo.isPortrait;
+  let s;
+  if (rotated) {
+    s = Math.min(window.innerHeight / 1280, window.innerWidth / 720);
+    gc.style.transform = `translate(-50%, -50%) rotate(90deg) scale(${s})`;
+  } else {
+    s = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+    gc.style.transform = `translate(-50%, -50%) scale(${s})`;
+  }
+  gc.classList.toggle('rotated', rotated);
+  window._gameScale = s;   // 供虚拟摇杆做屏幕坐标 → 游戏坐标换算
+}
+window.addEventListener('resize', resizeGame);
+resizeGame();
+
+// ============================================================
+// ③ 方向监听 + 横屏锁屏提示（一次性、可关闭、6 秒自动消失）
+// ============================================================
+let landscapeHintDismissed = false;
+let landscapeHintTimer = null;
+
+function updateLandscapeHint() {
+  const hint = document.getElementById('landscape-hint');
+  if (!hint) return;
+  const shouldShow = deviceInfo.isMobileDevice && deviceInfo.isLandscape && !landscapeHintDismissed;
+  if (shouldShow && !hint.classList.contains('show')) {
+    hint.classList.add('show');
+    if (landscapeHintTimer) clearTimeout(landscapeHintTimer);
+    landscapeHintTimer = setTimeout(dismissLandscapeHint, 6000);
+  } else if (!shouldShow) {
+    hint.classList.remove('show');
+  }
+}
+
+function dismissLandscapeHint() {
+  landscapeHintDismissed = true;
+  if (landscapeHintTimer) { clearTimeout(landscapeHintTimer); landscapeHintTimer = null; }
+  const hint = document.getElementById('landscape-hint');
+  if (hint) hint.classList.remove('show');
+}
+
+function updateOrientation() {
+  const isPortrait = window.matchMedia
+    ? window.matchMedia('(orientation: portrait)').matches
+    : (window.innerHeight > window.innerWidth);
+  deviceInfo.isPortrait = isPortrait;
+  deviceInfo.isLandscape = !isPortrait;
+  const root = document.documentElement;
+  root.classList.toggle('device-portrait', isPortrait);
+  root.classList.toggle('device-landscape', !isPortrait);
+  resizeGame();
+  updateLandscapeHint();
+}
+window.addEventListener('resize', updateOrientation);
+window.addEventListener('orientationchange', updateOrientation);
+if (window.screen && screen.orientation && screen.orientation.addEventListener) {
+  screen.orientation.addEventListener('change', updateOrientation);
+}
+updateOrientation();
+
+// ============================================================
+// 全局状态与常量
+// ============================================================
+const STORAGE_PREFIX = 'erjiyuan_purge_';
+// 音量设置在所有关卡间共用（与 Demo_Level0 同一对键）
+const VOLUME_PREFIX = 'linkgame_';
+
+const state = {
+  inventory: [],           // [{id, count}] — 物品栏（可拖拽）
+  backpack: [],            // 背包（max 9）
+  currentRoom: 'A',
+  navEnabled: false,       // NPC1 首次对话后开启向右导航
+  npc1Talked: false,
+  gameCleared: false,
+  allFourDropped: false,   // 4 个假二次元已全部交付 NPC1
+  helmetGiven: false,      // 通关道具（真二次元周边）已入背包
+  mazeCollected: {},       // 迷宫内已收集 {itemId: true}
+  droppedIds: {},          // 已交付 NPC1 的 {itemId: true}
+  keys: {},                // 键盘按住状态
+  moveVector: { x: 0, y: 0 },
+  joystickActive: false,
+  playerVisible: false,
+  playerX: 0, playerY: 0,  // 玩家中心（游戏坐标）
+  playerFacing: 'left',
+  anchorR: 0, anchorC: 0,  // 玩家当前所在格
+  targetR: 0, targetC: 0,  // 移动目标格
+  moving: false,
+  lastDir: null,           // {dx,dy}
+  hp: 10,
+  mazeHintShown: false,
+  mazeFirstGlowShown: false,       // 首次进入迷宫的强化白光只播放一次
+  mazeReturnedIncomplete: false,   // 未集齐四个可拾取道具便从出口离开迷宫返回 roomA
+  paused: false,
+  grid: null,
+  entranceRow: 0,
+  exitRow: 0,
+  collectNpcs: [],
+  staticNpcs: [],
+  patrols: [],
+  mazeBuilt: false,
+};
+
+const CELL = 40;              // 通道宽 / 网格格宽（玩家与 NPC 同宽）
+const MAZE_COLS = 25;         // 含外圈墙
+const MAZE_ROWS = 15;
+const MAZE_W = MAZE_COLS * CELL;   // 1000
+const MAZE_H = MAZE_ROWS * CELL;   // 600
+const MAZE_X = 60;            // (1120-1000)/2
+const MAZE_Y = 60;            // (720-600)/2
+const PLAYER_SIZE = 32;       // 实体范围缩小 20%（40 → 32）
+const PLAYER_HALF = 13;       // 碰撞盒半宽（略小于实体，便于贴边转向）
+const PLAYER_SPEED = 280;     // 游戏坐标 px/s（键盘与摇杆共用；略微提速）
+const COLLECT_IDS = ['erjiyuan-2', 'erjiyuan-3', 'erjiyuan-4', 'erjiyuan-5'];
+
+// ============================================================
+// 音频系统（模板 §6.6 / §6.7）
+// ============================================================
+let sfxVolume = 0.8;
+let musicVolume = 0.7;
+let audioCtx = null;
+let bgmStarted = false;
+let bgmDroneOscs = [];
+
+function getAudioCtx() {
+  if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+  return audioCtx;
+}
+
+function playSound(type) {
+  const el = document.getElementById('sfx-' + type);
+  if (el && sfxVolume > 0.01) {
+    const clone = el.cloneNode();
+    clone.volume = sfxVolume;
+    clone.play().catch(function() {});
+  }
+}
+
+function playSuccessJingle() {
+  if (sfxVolume < 0.01) return;
+  try {
+    const ctx = getAudioCtx();
+    const now = ctx.currentTime;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(sfxVolume * 0.4, now);
+    gain.connect(ctx.destination);
+    const notes = [523.25, 659.25, 783.99, 1046.50];
+    notes.forEach(function(freq, i) {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+      const noteGain = ctx.createGain();
+      const t0 = now + i * 0.12;
+      noteGain.gain.setValueAtTime(0, t0);
+      noteGain.gain.linearRampToValueAtTime(sfxVolume * 0.3, t0 + 0.04);
+      noteGain.gain.linearRampToValueAtTime(0, t0 + 0.35);
+      osc.connect(noteGain);
+      noteGain.connect(gain);
+      osc.start(t0);
+      osc.stop(t0 + 0.4);
+    });
+  } catch (e) { /* silent */ }
+}
+
+function startBgm() {
+  bgmStarted = true;
+  const bgm = document.getElementById('bgm');
+  if (bgm) { bgm.volume = musicVolume * 0.4; bgm.play().catch(function() {}); }
+  try {
+    const ctx = getAudioCtx();
+    if (bgmDroneOscs.length) return;
+    const now = ctx.currentTime;
+    [55, 82.41, 110].forEach(function(f, i) {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = f;
+      const gain = ctx.createGain();
+      gain.gain.value = musicVolume * 0.04 / 2;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      bgmDroneOscs.push({ osc: osc, gain: gain });
+    });
+  } catch (e) { /* silent */ }
+}
+
+function stopBgm() {
+  bgmStarted = false;
+  const bgm = document.getElementById('bgm');
+  if (bgm) { bgm.pause(); bgm.currentTime = 0; }
+  bgmDroneOscs.forEach(function(o) {
+    try { o.osc.stop(); } catch (e) {}
+    try { o.gain.disconnect(); } catch (e) {}
+  });
+  bgmDroneOscs = [];
+}
+
+// ============================================================
+// 对话框 & 对话气泡（模板 §6.4）
+// ============================================================
+let dialogTimer = null;
+let speechTimers = {};
+let dialogClickCallback = null;
+
+function showDialog(text, duration) {
+  hideDialog();
+  const box = document.getElementById('dialog-box');
+  box.textContent = text;
+  box.classList.add('visible');
+  playSound('dialog');
+  state.dialogActive = true;
+  // 统一：对话框不自动消失，点击对话框范围区域后才消失；显示期间锁定游戏界面
+  document.getElementById('dialog-lock').classList.add('show');
+}
+
+function showDialogPersistent(text, callback) {
+  hideDialog();
+  const box = document.getElementById('dialog-box');
+  box.textContent = text;
+  box.classList.add('visible');
+  box.style.cursor = "url('images/cursor-default.png') 2 2, auto";
+  playSound('dialog');
+  state.dialogActive = true;
+  dialogClickCallback = callback;
+  // 统一：对话框不自动消失，点击对话框范围区域后才消失并执行后续
+  document.getElementById('dialog-lock').classList.add('show');
+}
+
+function hideDialog() {
+  if (dialogTimer) { clearTimeout(dialogTimer); dialogTimer = null; }
+  dialogClickCallback = null;
+  const box = document.getElementById('dialog-box');
+  box.classList.remove('visible');
+  box.style.cursor = '';
+  state.dialogActive = false;
+  hideBubbles();
+  document.getElementById('dialog-lock').classList.remove('show');
+}
+
+function attachDialogClickHandler() {
+  document.getElementById('dialog-box').addEventListener('click', function() {
+    if (dialogClickCallback) {
+      const cb = dialogClickCallback;
+      dialogClickCallback = null;
+      hideDialog();
+      if (cb) cb();
+    } else {
+      hideDialog();
+    }
+  });
+}
+
+function hideBubbles() {
+  Object.keys(speechTimers).forEach(function(k) {
+    clearTimeout(speechTimers[k]);
+    delete speechTimers[k];
+  });
+  document.querySelectorAll('.speech-bubble').forEach(function(el) { el.classList.remove('show'); });
+}
+
+// ============================================================
+// 物品栏 & 背包 API（模板 §6.2 / §6.3）
+// ============================================================
+function addItem(id) {
+  const existing = state.inventory.find(function(i) { return i.id === id; });
+  if (existing) { existing.count++; }
+  else { state.inventory.push({ id: id, count: 1 }); }
+  renderInventory();
+}
+
+function removeItem(id, count) {
+  const idx = state.inventory.findIndex(function(i) { return i.id === id; });
+  if (idx < 0) return;
+  if (!count || state.inventory[idx].count <= count) { state.inventory.splice(idx, 1); }
+  else { state.inventory[idx].count -= count; }
+  renderInventory();
+}
+
+function renderInventory() {
+  const inv = document.getElementById('ui-inventory');
+  inv.innerHTML = '';
+  state.inventory.forEach(function(item) {
+    const slot = document.createElement('div');
+    slot.className = 'inv-slot';
+    const itemDiv = document.createElement('div');
+    itemDiv.className = 'inv-item';
+    itemDiv.setAttribute('data-item-id', item.id);
+    itemDiv.style.backgroundImage = "url('images/item-" + item.id + ".png')";
+    itemDiv.addEventListener('mousedown', startManualDrag);
+    itemDiv.addEventListener('touchstart', touchStart, { passive: false });
+    itemDiv.addEventListener('click', function(e) {
+      if (justDragged) return;
+      handleItemClick(item.id);
+    });
+    slot.appendChild(itemDiv);
+    if (item.count > 1) {
+      const badge = document.createElement('span');
+      badge.className = 'inv-count';
+      badge.textContent = item.count;
+      slot.appendChild(badge);
+    }
+    inv.appendChild(slot);
+  });
+}
+
+// ---- 物品描述窗口（点击迷宫内物品 / 道具栏道具时弹出） ----
+const ITEM_DESC = {
+  'erjiyuan-2': { title: '关于【藕饼】', text: '藕是一个活泼热情的孩子，我喜欢。饼是一个沉稳冷静的孩子，我喜欢。藕饼是一对特别合拍的搭档，我喜欢。就是这个配色看起来不可食用。', img: 'item-erjiyuan-2.png' },
+  'erjiyuan-3': { title: '关于【内鱼徽章】', text: '虽然内鱼一直没打开国际市场，但是可以平等被印在徽章上。', img: 'item-erjiyuan-3.png' },
+  'erjiyuan-4': { title: '关于【小卡】', text: '过于传神，不便描述。', img: 'item-erjiyuan-4.png' },
+  'erjiyuan-5': { title: '关于【LADADA】', text: '买不起正版，可以买点乂鸟设计，性价比之王。', img: 'item-erjiyuan-5.png' },
+  // 三个真二次元各占一条，文案暂与原来一致，便于日后分别改写
+  'real-erjiyuan-1': { title: '关于【嗦呢游戏机】', text: '非常原教旨主义的游戏设备。', img: 'npc-6.png' },
+  'real-erjiyuan-2': { title: '关于【杂志】', text: '谁内心还没个变身魔法少女的梦呢？', img: 'npc-7.png' },
+  'real-erjiyuan-3': { title: '关于【手办】', text: '不管你know不know青蓝双马尾是who，别喊螺钿颐就行。', img: 'npc-8.png' }
+};
+
+// img 可覆盖表里的默认图：迷宫内点击时传入被点实体的实际图片
+function openItemDesc(key, img) {
+  const d = ITEM_DESC[key];
+  if (!d) return;
+  document.getElementById('item-desc-title').textContent = d.title;
+  document.getElementById('item-desc-text').textContent = d.text;
+  document.getElementById('item-desc-img').src = 'images/' + (img || d.img);
+  document.getElementById('item-desc-overlay').classList.add('show');
+  playSound('click');
+}
+
+function closeItemDesc() {
+  document.getElementById('item-desc-overlay').classList.remove('show');
+}
+
+function handleItemClick(itemId) {
+  openItemDesc(itemId);   // 道具栏中点击道具：弹描述窗口（不再走底部对话框）
+}
+
+// ---- 返回 Level0（获得通关道具后，左上角出现返回按钮） ----
+const RETURN_LEVEL_NUM = 3;
+const RETURN_ITEM_ID = 'erjiyuan-final';
+
+function updateReturnBtn() {
+  const btn = document.getElementById('return-btn');
+  if (!btn) return;
+  // 仅按本局进度显示（本局真的拿到"真二次元周边"后才出现）；
+  // linkgame_backpack 存档照旧写入，供 Demo_Level0 通关检测使用
+  const has = state.backpack.indexOf(RETURN_ITEM_ID) !== -1;
+  btn.style.display = has ? 'flex' : 'none';
+}
+
+function returnToLevel0() {
+  try { localStorage.setItem('linkgame_pendingReturn', String(RETURN_LEVEL_NUM)); } catch (e) {}
+  window.location.href = '../Demo_Level0/index.html';
+}
+
+window.addEventListener('DOMContentLoaded', updateReturnBtn);
+
+function addBackpackItem(id) {
+  if (state.backpack.length >= 9) return;
+  state.backpack.push(id);
+  // 跨关卡同步：把本关道具合并进共享背包键（Demo_Level0 通关检测用）
+  try {
+    const shared = JSON.parse(localStorage.getItem('linkgame_backpack') || '[]');
+    state.backpack.forEach(pid => { if (shared.indexOf(pid) === -1) shared.push(pid); });
+    localStorage.setItem('linkgame_backpack', JSON.stringify(shared));
+  } catch (e) {}
+  updateReturnBtn();
+  renderBackpack();
+  // 获得本关通关物品 → 对话框提示返回地铁站
+  if (id === RETURN_ITEM_ID) showDialog('点击左上角返回地铁站吧！');
+}
+
+function renderBackpack() {
+  const grid = document.getElementById('backpack-grid');
+  if (!grid) return;
+  const slots = grid.querySelectorAll('.bp-slot');
+  slots.forEach(function(slot, i) {
+    slot.innerHTML = '';
+    slot.classList.remove('drag-over-target');
+    if (i < state.backpack.length) {
+      const itemDiv = document.createElement('div');
+      itemDiv.className = 'bp-item';
+      itemDiv.setAttribute('data-item-id', state.backpack[i]);
+      itemDiv.style.backgroundImage = "url('images/item-" + state.backpack[i] + ".png')";
+      itemDiv.addEventListener('mousedown', startManualDrag);
+      itemDiv.addEventListener('touchstart', touchStart, { passive: false });
+      slot.appendChild(itemDiv);
+    }
+  });
+}
+
+function toggleBackpack() {
+  const overlay = document.getElementById('backpack-overlay');
+  const settingsOverlay = document.getElementById('settings-overlay');
+  if (settingsOverlay.classList.contains('show')) { settingsOverlay.classList.remove('show'); }
+  overlay.classList.toggle('show');
+  if (overlay.classList.contains('show')) { playSound('click'); renderBackpack(); }
+}
+
+// ============================================================
+// 设置 API（模板 §6.7，强制规范）
+// ============================================================
+function toggleSettings() {
+  const overlay = document.getElementById('settings-overlay');
+  const backpackOverlay = document.getElementById('backpack-overlay');
+  if (backpackOverlay.classList.contains('show')) { backpackOverlay.classList.remove('show'); }
+  overlay.classList.toggle('show');
+  if (overlay.classList.contains('show')) playSound('click');
+}
+
+function onMusicVolume(value) {
+  musicVolume = parseInt(value) / 100;
+  document.getElementById('vol-music-label').textContent = value;
+  localStorage.setItem(VOLUME_PREFIX + 'music_vol', value);
+  const bgmEl = document.getElementById('bgm');
+  if (bgmEl) bgmEl.volume = musicVolume * 0.4;
+  if (musicVolume > 0.01 && !bgmStarted) {
+    startBgm();
+  } else if (musicVolume <= 0.01 && bgmStarted) {
+    stopBgm();
+  }
+}
+
+function onSfxVolume(value) {
+  sfxVolume = parseInt(value) / 100;
+  document.getElementById('vol-sfx-label').textContent = value;
+  localStorage.setItem(VOLUME_PREFIX + 'sfx_vol', value);
+}
+
+function openExternalLink() { playSound('click'); window.open('https://link-project.super.site/', '_blank'); }
+
+function loadSettings() {
+  const mv = localStorage.getItem(VOLUME_PREFIX + 'music_vol');
+  const sv = localStorage.getItem(VOLUME_PREFIX + 'sfx_vol');
+  if (mv !== null) {
+    musicVolume = parseInt(mv) / 100;
+    document.getElementById('vol-music').value = mv;
+    document.getElementById('vol-music-label').textContent = mv;
+  }
+  if (sv !== null) {
+    sfxVolume = parseInt(sv) / 100;
+    document.getElementById('vol-sfx').value = sv;
+    document.getElementById('vol-sfx-label').textContent = sv;
+  }
+}
+
+// ============================================================
+// 道具拾取弹窗（模板 §6.8）
+// ============================================================
+let pendingPickupItem = null;
+
+function showPickupModal(itemId, itemName) {
+  pendingPickupItem = itemId;
+  document.getElementById('pickup-item-img').style.backgroundImage = "url('images/item-" + itemId + ".png')";
+  document.getElementById('pickup-item-name').textContent = itemName;
+  document.getElementById('pickup-overlay').classList.add('visible');
+  playSound('pickup');
+}
+
+function confirmPickup() {
+  const itemId = pendingPickupItem;
+  if (itemId) {
+    pendingPickupItem = null;
+    document.getElementById('pickup-overlay').classList.remove('visible');
+    addBackpackItem(itemId);
+    if (itemId === 'erjiyuan-final') {
+      // 真二次元周边（头盔）= 通关道具：确认即通关
+      state.gameCleared = true;
+      state.helmetGiven = true;
+      updateNPC1DropTarget();
+      updateNavVisibility();
+      playSound('success');
+      playSuccessJingle();
+    }
+  } else {
+    document.getElementById('pickup-overlay').classList.remove('visible');
+  }
+}
+
+function anyOverlayOpen() {
+  return document.getElementById('pickup-overlay').classList.contains('visible') ||
+         document.getElementById('item-desc-overlay').classList.contains('show') ||
+         document.getElementById('settings-overlay').classList.contains('show') ||
+         document.getElementById('backpack-overlay').classList.contains('show');
+}
+
+// ============================================================
+// 房间导航（roomA ↔ roomB；roomB 无导航 UI，靠迷宫出口返回）
+// ============================================================
+function changeRoom(dir) {
+  if (dir !== 1) return;
+  if (state.currentRoom !== 'A') return;
+  if (!state.navEnabled) return;
+  if (state.gameCleared) return;
+  if (anyOverlayOpen()) return;
+  enterRoom('B');
+}
+
+function updateNavVisibility() {
+  const nl = document.getElementById('nav-left');
+  const nr = document.getElementById('nav-right');
+  nl.classList.remove('visible');
+  nr.classList.toggle('visible',
+    state.currentRoom === 'A' && state.navEnabled && !state.gameCleared && !state.allFourDropped);
+}
+
+function enterRoom(room) {
+  state.currentRoom = room;
+  document.querySelectorAll('.room').forEach(function(r) { r.classList.remove('active-room'); });
+  document.getElementById('room-' + room).classList.add('active-room');
+
+  if (room === 'A') {
+    state.playerVisible = false;
+  } else {
+    state.playerVisible = true;
+    setHp(10);                 // 每次进入迷宫血量为默认 10
+    // "这是真二次元"回复道具：每次进入迷宫重置，每格可再回复一次
+    state.staticNpcs.forEach(function(n) { n.healed = false; });
+    respawnAtEntrance(1);      // 出生在入口右侧一格，而不是入口本格
+    state.playerFacing = 'right';
+    // 第一次进入迷宫：玩家白光临时放大加亮，持续 3 秒
+    if (!state.mazeFirstGlowShown) {
+      state.mazeFirstGlowShown = true;
+      const playerEl = state.playerEl || document.getElementById('entity-player');
+      if (playerEl) {
+        playerEl.classList.add('first-glow');
+        setTimeout(function() { playerEl.classList.remove('first-glow'); }, 3000);
+      }
+    }
+    if (!state.mazeHintShown) {
+      state.mazeHintShown = true;
+      const hint = deviceInfo.isMobileDevice
+        ? '拖动左下角摇杆穿越迷宫，收集发光的假二次元！'
+        : '用 WASD 或方向键穿越迷宫，收集发光的假二次元！';
+      setTimeout(function() { showDialog(hint, 3200); }, 400);
+    }
+  }
+  renderPlayer();
+  updateNPC1DropTarget();
+  showJoystick();
+  hideDialog();
+  updateNavVisibility();
+  playSound('nav');
+}
+
+// 走到迷宫出口（右侧墙开口）→ 切回 roomA
+function onMazeExit() {
+  playSound('success');
+  const all = allFourCollected();
+  if (all) {
+    // 通关：先弹出"走出商场迷宫"对话框，点击消失后再切回 roomA
+    showDialogPersistent('走出商场迷宫了！回去找二次元情侣吧！', function() {
+      enterRoom('A');
+    });
+  } else {
+    state.mazeReturnedIncomplete = true;   // 未集齐四个道具就离开迷宫
+    enterRoom('A');
+    setTimeout(function() {
+      showDialog('走出迷宫，回到了大厅！', 2600);
+    }, 300);
+  }
+}
+
+function allFourCollected() {
+  return COLLECT_IDS.every(function(id) { return state.mazeCollected[id]; });
+}
+
+// ============================================================
+// 迷宫生成（Prim 随机迷宫：每次打开页面重新随机）
+// ============================================================
+function centerX(c) { return MAZE_X + c * CELL + CELL / 2; }
+function centerY(r) { return MAZE_Y + r * CELL + CELL / 2; }
+function isPath(r, c) {
+  if (r < 0 || r >= MAZE_ROWS || c < 0 || c >= MAZE_COLS) return false;
+  return state.grid[r][c] === 1;
+}
+
+function generateMaze() {
+  const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+  const inInterior = function(r, c) { return r >= 1 && r <= MAZE_ROWS - 2 && c >= 1 && c <= MAZE_COLS - 2; };
+  let grid, entR, extR, pathCount;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    grid = [];
+    for (let r = 0; r < MAZE_ROWS; r++) { grid.push(new Array(MAZE_COLS).fill(0)); }
+    // 随机 Prim 起点
+    const sr = 1 + Math.floor(Math.random() * (MAZE_ROWS - 2));
+    const sc = 1 + Math.floor(Math.random() * (MAZE_COLS - 2));
+    grid[sr][sc] = 1;
+    const frontier = [];
+    const inF = {};
+    function addFront(r, c) {
+      // 把 (r,c) 的 4 个未通路邻格加入前沿（Prim 前沿 = 待挖的墙格）
+      for (let d = 0; d < dirs.length; d++) {
+        const nr = r + dirs[d][0], nc = c + dirs[d][1];
+        if (!inInterior(nr, nc)) continue;
+        const k = nr + ',' + nc;
+        if (grid[nr][nc] === 0 && !inF[k]) { frontier.push([nr, nc]); inF[k] = true; }
+      }
+    }
+    addFront(sr, sc);
+    while (frontier.length) {
+      const idx = Math.floor(Math.random() * frontier.length);
+      const cell = frontier.splice(idx, 1)[0];
+      delete inF[cell[0] + ',' + cell[1]];
+      let nbr = 0;
+      for (let d = 0; d < dirs.length; d++) {
+        const nr = cell[0] + dirs[d][0], nc = cell[1] + dirs[d][1];
+        if (inInterior(nr, nc) && grid[nr][nc] === 1) nbr++;
+      }
+      if (nbr === 1) { grid[cell[0]][cell[1]] = 1; addFront(cell[0], cell[1]); }
+    }
+    // 入口 / 出口
+    entR = 1 + Math.floor(Math.random() * (MAZE_ROWS - 2));
+    extR = 1 + Math.floor(Math.random() * (MAZE_ROWS - 2));
+    grid[entR][0] = 1;
+    grid[extR][MAZE_COLS - 1] = 1;
+    // 连通出入口内部格到主路
+    state.grid = grid;
+    connectToMaze(entR, 1);
+    connectToMaze(extR, MAZE_COLS - 2);
+    // 打洞增加回环（多回路 → 复杂度更高，贴近吃豆人）
+    for (let i = 0; i < 10; i++) {
+      const r = 1 + Math.floor(Math.random() * (MAZE_ROWS - 2));
+      const c = 1 + Math.floor(Math.random() * (MAZE_COLS - 2));
+      if (grid[r][c] === 0) {
+        const horiz = grid[r][c - 1] === 1 && grid[r][c + 1] === 1;
+        const vert = grid[r - 1][c] === 1 && grid[r + 1][c] === 1;
+        if (horiz || vert) grid[r][c] = 1;
+      }
+    }
+    // 统计通路格数，过少则重新生成（25×15 → 内部 23×13=299，需≥150 格）
+    pathCount = 0;
+    for (let r = 1; r <= MAZE_ROWS - 2; r++) {
+      for (let c = 1; c <= MAZE_COLS - 2; c++) { if (grid[r][c] === 1) pathCount++; }
+    }
+    if (pathCount >= 150) break;
+  }
+  state.grid = grid;
+  state.entranceRow = entR;
+  state.exitRow = extR;
+}
+
+function connectToMaze(r0, c0) {
+  const g = state.grid;
+  if (g[r0][c0] === 1) return;
+  const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+  const q = [[r0, c0]];
+  const prev = {};
+  prev[r0 + ',' + c0] = null;
+  let qi = 0, found = null;
+  while (qi < q.length && !found) {
+    const cell = q[qi++];
+    for (let d = 0; d < dirs.length; d++) {
+      const nr = cell[0] + dirs[d][0], nc = cell[1] + dirs[d][1];
+      if (nr < 1 || nr > MAZE_ROWS - 2 || nc < 1 || nc > MAZE_COLS - 2) continue;
+      const k = nr + ',' + nc;
+      if (prev[k] !== undefined) continue;
+      if (g[nr][nc] === 1) { prev[k] = [cell[0], cell[1]]; found = [nr, nc]; break; }
+      prev[k] = [cell[0], cell[1]];
+      q.push([nr, nc]);
+    }
+  }
+  if (!found) return;
+  let cur = found;
+  while (cur) {
+    g[cur[0]][cur[1]] = 1;
+    cur = prev[cur[0] + ',' + cur[1]];
+  }
+}
+
+// 查找直线通路（供巡逻怪使用）
+function findRuns() {
+  const runs = [];
+  for (let r = 1; r <= MAZE_ROWS - 2; r++) {
+    let c = 1;
+    while (c <= MAZE_COLS - 2) {
+      if (state.grid[r][c] === 1) {
+        let c2 = c;
+        while (c2 <= MAZE_COLS - 2 && state.grid[r][c2] === 1) c2++;
+        runs.push({ ori: 'h', row: r, c0: c, c1: c2 - 1, len: c2 - c });
+        c = c2;
+      } else { c++; }
+    }
+  }
+  for (let c = 1; c <= MAZE_COLS - 2; c++) {
+    let r = 1;
+    while (r <= MAZE_ROWS - 2) {
+      if (state.grid[r][c] === 1) {
+        let r2 = r;
+        while (r2 <= MAZE_ROWS - 2 && state.grid[r2][c] === 1) r2++;
+        runs.push({ ori: 'v', col: c, r0: r, r1: r2 - 1, len: r2 - r });
+        r = r2;
+      } else { r++; }
+    }
+  }
+  runs.sort(function(a, b) { return b.len - a.len; });
+  return runs;
+}
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+  }
+}
+
+function createMazeNpc(r, c, img, halo) {
+  const el = document.createElement('div');
+  el.className = 'entity maze-npc';
+  const x = centerX(c), y = centerY(r);
+  el.style.transform = 'translate3d(' + (x - CELL / 2) + 'px,' + (y - CELL / 2) + 'px,0)';
+  if (halo) {
+    const h = document.createElement('div');
+    h.className = 'npc-halo';
+    el.appendChild(h);
+  }
+  const s = document.createElement('div');
+  s.className = 'npc-sprite';
+  s.style.backgroundImage = "url('images/" + img + "')";
+  el.appendChild(s);
+  document.getElementById('room-B').appendChild(el);
+  return el;
+}
+
+function buildMaze() {
+  if (state.mazeBuilt) return;   // 每次打开页面仅生成一次
+  state.mazeBuilt = true;
+  generateMaze();
+
+  // 渲染墙壁
+  const mazeEl = document.getElementById('maze');
+  mazeEl.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  for (let r = 0; r < MAZE_ROWS; r++) {
+    for (let c = 0; c < MAZE_COLS; c++) {
+      if (state.grid[r][c] === 0) {
+        const w = document.createElement('div');
+        w.className = 'maze-wall wall-' + (1 + Math.floor(Math.random() * 3));   // 三种便签样式随机分布
+        w.style.left = (c * CELL) + 'px';
+        w.style.top = (r * CELL) + 'px';
+        frag.appendChild(w);
+      }
+    }
+  }
+  mazeEl.appendChild(frag);
+
+  // 出入口标记（1:1 方形美术，定位到格中心）
+  document.getElementById('maze-entrance').style.left = (centerX(0) - CELL / 2) + 'px';
+  document.getElementById('maze-entrance').style.top = (centerY(state.entranceRow) - CELL / 2) + 'px';
+  document.getElementById('maze-exit').style.left = (centerX(MAZE_COLS - 1) - CELL / 2) + 'px';
+  document.getElementById('maze-exit').style.top = (centerY(state.exitRow) - CELL / 2) + 'px';
+
+  // 路径格列表（内部）
+  const paths = [];
+  for (let r = 1; r <= MAZE_ROWS - 2; r++) {
+    for (let c = 1; c <= MAZE_COLS - 2; c++) { if (state.grid[r][c] === 1) paths.push([r, c]); }
+  }
+  // 收集物 NPC2/3/4/5（发光，分布在远离入口处）
+  const dist = function(r, c) { return Math.abs(r - state.entranceRow) + Math.abs(c - 1); };
+  const candidates = paths.filter(function(p) { return dist(p[0], p[1]) >= 3; });
+  shuffle(candidates);
+  const collectCells = candidates.slice(0, 4);
+  const used = {};
+  collectCells.forEach(function(p) { used[p[0] + ',' + p[1]] = true; });
+  state.collectNpcs = [];
+  for (let i = 0; i < collectCells.length; i++) {
+    const itemId = COLLECT_IDS[i];
+    const r = collectCells[i][0], c = collectCells[i][1];
+    const el = createMazeNpc(r, c, 'npc-' + (i + 2) + '.png', true);
+    el.addEventListener('click', function() { openItemDesc(itemId, 'npc-' + (i + 2) + '.png'); });   // 单击弹描述窗口（拾取仍靠走上去触发）
+    state.collectNpcs.push({ itemId: itemId, r: r, c: c, el: el });
+  }
+  // 静态真二次元 NPC6/7/8（无发光，触碰出气泡）
+  const remaining = paths.filter(function(p) { return !used[p[0] + ',' + p[1]]; });
+  shuffle(remaining);
+  const staticCells = remaining.slice(0, 3);
+  state.staticNpcs = [];
+  for (let i = 0; i < staticCells.length; i++) {
+    const r = staticCells[i][0], c = staticCells[i][1];
+    const el = createMazeNpc(r, c, 'npc-' + (6 + i) + '.png', false);
+    const b = document.createElement('div');
+    b.className = 'speech-bubble';
+    b.id = 'bubble-npc-' + (6 + i);
+    b.textContent = '这是真二次元';
+    b.style.left = (centerX(c) - 70) + 'px';
+    b.style.top = (centerY(r) - 68) + 'px';   // 气泡下缘与 NPC 实体范围上缘相切（NPC 上缘 = centerY-20，气泡盒高≈48）
+    document.getElementById('room-area').appendChild(b);
+    el.addEventListener('click', function() { openItemDesc('real-erjiyuan-' + (i + 1), 'npc-' + (6 + i) + '.png'); });
+    state.staticNpcs.push({ r: r, c: c, el: el, b: b, healed: false });
+  }
+  // 巡逻怪 NPC9 ×5（沿直线通道往复，速度各不相同）
+  let runs = findRuns().filter(function(run) {
+    return run.len >= 4;
+  });
+  if (runs.length < 5) {
+    runs = findRuns().filter(function(run) { return run.len >= 3; });
+  }
+  shuffle(runs);
+  const patrolRuns = runs.slice(0, 5);
+  const speeds = [60, 85, 110, 135, 160];   // 5 个速度各不相同，保持压迫感
+  state.patrols = [];
+  for (let i = 0; i < patrolRuns.length; i++) {
+    const run = patrolRuns[i];
+    const el = createMazeNpc(run.row !== undefined ? run.row : run.r0, run.col !== undefined ? run.col : run.c0, 'npc-9.png', false);
+    let p;
+    if (run.ori === 'h') {
+      const min = MAZE_X + run.c0 * CELL + CELL / 2;
+      const max = MAZE_X + run.c1 * CELL + CELL / 2;
+      p = { el: el, ori: 'h', row: run.row, min: min, max: max, pos: (min + max) / 2, dir: Math.random() < 0.5 ? 1 : -1, speed: speeds[i], touching: false };
+      p.el.style.transform = 'translate3d(' + (p.pos - CELL / 2) + 'px,' + (centerY(p.row) - CELL / 2) + 'px,0)';
+    } else {
+      const min = MAZE_Y + run.r0 * CELL + CELL / 2;
+      const max = MAZE_Y + run.r1 * CELL + CELL / 2;
+      p = { el: el, ori: 'v', col: run.col, min: min, max: max, pos: (min + max) / 2, dir: Math.random() < 0.5 ? 1 : -1, speed: speeds[i], touching: false };
+      p.el.style.transform = 'translate3d(' + (centerX(p.col) - CELL / 2) + 'px,' + (p.pos - CELL / 2) + 'px,0)';
+    }
+    state.patrols.push(p);
+  }
+}
+
+// ============================================================
+// 玩家移动（网格制：吃豆人式沿格移动）
+// ============================================================
+function renderPlayer() {
+  if (!state.playerEl) return;
+  if (!state.playerVisible) { state.playerEl.style.display = 'none'; return; }
+  state.playerEl.style.display = 'block';
+  state.playerEl.style.transform = 'translate3d(' + (state.playerX - PLAYER_SIZE / 2) + 'px,' + (state.playerY - PLAYER_SIZE / 2) + 'px,0)';
+  state.playerEl.style.backgroundImage = (state.playerFacing === 'right')
+    ? "url('images/player-right.png')"
+    : "url('images/player-left.png')";
+}
+
+function setFacing(f) {
+  if (state.playerFacing !== f) { state.playerFacing = f; renderPlayer(); }
+}
+
+function setHp(h) {
+  state.hp = Math.max(0, Math.min(10, h));
+  document.getElementById('hp-num').textContent = state.hp;
+  document.getElementById('hp-display').classList.toggle('low', state.hp <= 3);
+}
+
+// col 省略时回到入口本格（血量归零重生）；进入迷宫时传 1，出生在入口右侧一格
+function respawnAtEntrance(col) {
+  if (col === undefined) col = 0;
+  state.anchorR = state.entranceRow;
+  state.anchorC = col;
+  state.playerX = centerX(col);
+  state.playerY = centerY(state.entranceRow);
+  state.moving = false;
+}
+
+// 输入向量 → 四方向量化（斜向取主方向）
+function dirFromVector(vec) {
+  const dead = 0.3;
+  if (Math.hypot(vec.x, vec.y) < dead) return null;
+  if (Math.abs(vec.x) >= Math.abs(vec.y)) return { dx: Math.sign(vec.x), dy: 0 };
+  return { dx: 0, dy: Math.sign(vec.y) };
+}
+
+function updateMazeMovement(dir, dt) {
+  // 朝目标格中心移动
+  if (state.moving) {
+    const tx = centerX(state.targetC), ty = centerY(state.targetR);
+    const dx = tx - state.playerX, dy = ty - state.playerY;
+    const dist = Math.hypot(dx, dy);
+    const step = PLAYER_SPEED * dt;
+    if (dist <= step) {
+      state.playerX = tx; state.playerY = ty;
+      state.anchorR = state.targetR; state.anchorC = state.targetC;
+      state.moving = false;
+      // 抵达出口格 → 返回 roomA
+      if (state.anchorR === state.exitRow && state.anchorC === MAZE_COLS - 1) {
+        onMazeExit();
+        return;
+      }
+    } else {
+      state.playerX += dx / dist * step;
+      state.playerY += dy / dist * step;
+    }
+  }
+  if (state.moving) {
+    // 转弯辅助：仍在出发格内即可转向
+    if (dir && (dir.dx !== state.lastDir.dx || dir.dy !== state.lastDir.dy)) {
+      const nr = state.anchorR + dir.dy, nc = state.anchorC + dir.dx;
+      if (isPath(nr, nc)) {
+        state.targetR = nr; state.targetC = nc;
+        state.lastDir = dir;
+      }
+    }
+  } else if (dir) {
+    // 停在格中心：按输入起步
+    const nr = state.anchorR + dir.dy, nc = state.anchorC + dir.dx;
+    if (isPath(nr, nc)) {
+      state.targetR = nr; state.targetC = nc;
+      state.moving = true;
+      state.lastDir = dir;
+    }
+  }
+}
+
+// 巡逻怪更新
+function updatePatrols(dt) {
+  state.patrols.forEach(function(p) {
+    p.pos += p.dir * p.speed * dt;
+    if (p.pos > p.max) { p.pos = p.max; p.dir = -1; }
+    if (p.pos < p.min) { p.pos = p.min; p.dir = 1; }
+    // 朝向贴图：向左 / 上下移动 = npc-9.png（默认），向右 = npc-9-2.png
+    var img = (p.ori === 'h' && p.dir > 0) ? 'npc-9-2.png' : 'npc-9.png';
+    if (p.img !== img) {
+      p.img = img;
+      if (!p.sprite) p.sprite = p.el.querySelector('.npc-sprite');
+      if (p.sprite) p.sprite.style.backgroundImage = "url('images/" + img + "')";
+    }
+    if (p.ori === 'h') {
+      p.el.style.transform = 'translate3d(' + (p.pos - CELL / 2) + 'px,' + (centerY(p.row) - CELL / 2) + 'px,0)';
+    } else {
+      p.el.style.transform = 'translate3d(' + (centerX(p.col) - CELL / 2) + 'px,' + (p.pos - CELL / 2) + 'px,0)';
+    }
+  });
+}
+
+// ============================================================
+// 迷宫交互（收集 / 气泡 / 受伤）
+// ============================================================
+function itemName(id) {
+  const map = { 'erjiyuan-2': '假二次元·2', 'erjiyuan-3': '假二次元·3', 'erjiyuan-4': '假二次元·4', 'erjiyuan-5': '假二次元·5', 'erjiyuan-final': '真二次元周边' };
+  return map[id] || id;
+}
+
+function collectItem(n) {
+  state.mazeCollected[n.itemId] = true;
+  n.el.style.display = 'none';
+  addItem(n.itemId);
+  setHp(state.hp + 1);   // 收集 +1 血量（上限 10）
+  playSound('collect');
+  if (allFourCollected()) {
+    updateNPC1DropTarget();   // 集齐后启用大厅 NPC1 投放目标（无文字提示）
+  }
+}
+
+function flashPlayerRed() {
+  const el = state.playerEl;
+  if (!el) return;
+  el.classList.add('hurt');
+  if (el._hurtT) clearTimeout(el._hurtT);
+  el._hurtT = setTimeout(function() { el.classList.remove('hurt'); }, 350);
+}
+
+function onPatrolHit() {
+  if (state.dialogActive) return;   // 对话框显示期间（如迷宫通关提示）巡逻怪不扣血，避免覆盖通关提示
+  setHp(state.hp - 1);
+  flashPlayerRed();   // 被 NPC9 接触：player 仅发出一次红光（无文字提示、无音效）
+}
+
+function checkMazeCollisions() {
+  const pr = { l: state.playerX - PLAYER_HALF, r: state.playerX + PLAYER_HALF, t: state.playerY - PLAYER_HALF, b: state.playerY + PLAYER_HALF };
+
+  // 收集物 NPC2/3/4/5
+  state.collectNpcs.forEach(function(n) {
+    if (state.mazeCollected[n.itemId]) return;
+    const x0 = MAZE_X + n.c * CELL, y0 = MAZE_Y + n.r * CELL;
+    if (pr.l < x0 + CELL && pr.r > x0 && pr.t < y0 + CELL && pr.b > y0) collectItem(n);
+  });
+
+  // 静态真二次元 NPC6/7/8（触碰显示气泡，离开即消失）
+  state.staticNpcs.forEach(function(n) {
+    const x0 = MAZE_X + n.c * CELL, y0 = MAZE_Y + n.r * CELL;
+    const touch = pr.l < x0 + CELL && pr.r > x0 && pr.t < y0 + CELL && pr.b > y0;
+    if (touch && !n._show) { n.b.classList.add('show'); n._show = true; }
+    if (!touch && n._show) { n.b.classList.remove('show'); n._show = false; }
+    // 触碰"这是真二次元"回复 +2 血量（每次进入迷宫每格仅一次，气泡可反复触发但不再回血）
+    if (touch && !n.healed) { n.healed = true; setHp(state.hp + 2); }
+  });
+
+  // 巡逻怪 NPC9 ×3
+  state.patrols.forEach(function(p) {
+    let ex, ey;
+    if (p.ori === 'h') { ex = p.pos; ey = centerY(p.row); }
+    else { ex = centerX(p.col); ey = p.pos; }
+    const touch = pr.l < ex + CELL / 2 && pr.r > ex - CELL / 2 && pr.t < ey + CELL / 2 && pr.b > ey - CELL / 2;
+    if (touch && !p.touching) { p.touching = true; onPatrolHit(); }
+    if (!touch && p.touching) { p.touching = false; }
+  });
+
+  // 血量归零 → 自动切回迷宫入口
+  if (state.hp <= 0) {
+    playSound('fail');
+    setHp(10);
+    respawnAtEntrance();
+    renderPlayer();
+    showDialog('血量归零！回到了迷宫入口。', 1800);
+  }
+}
+
+// ============================================================
+// NPC1（roomA）对话与拖拽销毁
+// ============================================================
+function updateNPC1DropTarget() {
+  const npc1 = document.getElementById('entity-npc1');
+  if (allFourCollected() && !state.helmetGiven && !state.gameCleared) {
+    npc1.setAttribute('data-drop-target', 'npc1');
+  } else {
+    npc1.removeAttribute('data-drop-target');
+  }
+}
+
+function promptWinItem() {
+  showDialogPersistent('太好了，我们终于可以变回真二次元了！这个是真二次元周边，你拿着吧！', function() {
+    showPickupModal('erjiyuan-final', '真二次元周边');
+  });
+}
+
+function handleNPC1Click() {
+  if (anyOverlayOpen()) return;
+  if (state.gameCleared) {
+    showDialog('我们已经变回真二次元啦！谢谢你！', 2500);
+    return;
+  }
+  if (state.allFourDropped) {
+    promptWinItem();
+    return;
+  }
+  if (allFourCollected()) {
+    const dropped = Object.keys(state.droppedIds).length;
+    if (dropped === 0) {
+      showDialogPersistent('快把找到的假二次元给我们销毁', function() {});
+    } else {
+      showDialog('一共有4个，你要全部给我们才行呢！', 2200);
+    }
+    return;
+  }
+  if (state.mazeReturnedIncomplete) {
+    showDialog('你好像还没收集完呢，再去看看吧！', 2500);
+    return;
+  }
+  if (!state.npc1Talked) {
+    showDialogPersistent('把那些假二次元的东西清理掉吧！让我们变回真二次元', function() {
+      state.npc1Talked = true;
+      state.navEnabled = true;
+      updateNavVisibility();
+    });
+  } else {
+    showDialog('把那些假二次元的东西清理掉吧！让我们变回真二次元', 2500);
+  }
+}
+
+// ============================================================
+// 拖放交付（物品栏假二次元 → NPC1）
+// ============================================================
+function handleDrop(itemId, targetId, targetEl) {
+  if (targetId !== 'npc1') return;
+  if (COLLECT_IDS.indexOf(itemId) < 0) return;
+  if (!allFourCollected()) return;
+  if (state.helmetGiven || state.gameCleared) return;
+  if (state.droppedIds[itemId]) return;
+
+  removeItem(itemId, 1);
+  state.droppedIds[itemId] = true;
+  playSound('drop');
+
+  const dropped = Object.keys(state.droppedIds).length;
+  if (dropped >= 4) {
+    state.allFourDropped = true;
+    updateNPC1DropTarget();
+    updateNavVisibility();
+    hideDialog();
+    setTimeout(function() {
+      if (state.gameCleared) return;
+      promptWinItem();
+    }, 400);
+  }
+}
+
+// ============================================================
+// 输入（键盘 / 虚拟摇杆）
+// ============================================================
+const MOVE_CODES = { KeyW: 1, KeyA: 1, KeyS: 1, KeyD: 1, ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1 };
+
+window.addEventListener('keydown', function(e) {
+  const code = e.code;
+  if (MOVE_CODES[code]) e.preventDefault();
+  if (MOVE_CODES[code]) state.keys[code] = true;
+});
+window.addEventListener('keyup', function(e) {
+  const code = e.code;
+  if (MOVE_CODES[code]) delete state.keys[code];
+});
+
+const joystickEl = document.getElementById('joystick');
+const joystickKnob = document.getElementById('joystick-knob');
+const JOY_RADIUS = 55;
+let joyCenterX = 0, joyCenterY = 0;
+
+function showJoystick() {
+  joystickEl.style.display = (deviceInfo.isMobileDevice && state.currentRoom === 'B') ? 'block' : 'none';
+}
+
+joystickEl.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const t = e.touches[0];
+  const rect = joystickEl.getBoundingClientRect();
+  joyCenterX = rect.left + rect.width / 2;
+  joyCenterY = rect.top + rect.height / 2;
+  state.joystickActive = true;
+  updateJoystick(t);
+}, { passive: false });
+
+document.addEventListener('touchmove', function(e) {
+  if (!state.joystickActive) return;
+  e.preventDefault();
+  updateJoystick(e.touches[0]);
+}, { passive: false });
+
+document.addEventListener('touchend', endJoystick);
+document.addEventListener('touchcancel', endJoystick);
+
+// 注：本作迷宫采用网格制移动（吃豆人式沿格行走），移动统一由 gameLoop 经
+// computeMoveVector() 驱动（摇杆/键盘同一套逻辑），摇杆仅负责输出方向向量，
+// 不做 touchmove 直接位移 —— 这是对 VIRTUAL-JOYSTICK §7.1 直接位移的适配。
+function updateJoystick(t) {
+  let dx = (t.clientX - joyCenterX) / (window._gameScale || 1);
+  let dy = (t.clientY - joyCenterY) / (window._gameScale || 1);
+  if (document.getElementById('game-container').classList.contains('rotated')) {
+    const tmp = dx; dx = dy; dy = -tmp;
+  }
+  const len = Math.hypot(dx, dy);
+  if (len > JOY_RADIUS) { dx = dx / len * JOY_RADIUS; dy = dy / len * JOY_RADIUS; }
+  joystickKnob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+  state.moveVector = { x: dx / JOY_RADIUS, y: dy / JOY_RADIUS };
+}
+
+function endJoystick() {
+  if (!state.joystickActive) return;
+  state.joystickActive = false;
+  joystickKnob.style.transform = 'translate(0, 0)';
+  state.moveVector = { x: 0, y: 0 };
+}
+
+function computeMoveVector() {
+  if (state.joystickActive) {
+    const v = state.moveVector;
+    if (v.x !== 0 || v.y !== 0) return v;
+  }
+  const k = state.keys;
+  let x = 0, y = 0;
+  if (k['ArrowRight'] || k['KeyD']) x += 1;
+  if (k['ArrowLeft']  || k['KeyA']) x -= 1;
+  if (k['ArrowDown']  || k['KeyS']) y += 1;
+  if (k['ArrowUp']    || k['KeyW']) y -= 1;
+  const len = Math.hypot(x, y);
+  if (len > 0) { x /= len; y /= len; }
+  return { x: x, y: y };
+}
+
+// ============================================================
+// 游戏主循环
+// ============================================================
+function gameLoop(t) {
+  requestAnimationFrame(gameLoop);
+  if (!state.lastTime) state.lastTime = t;
+  let dt = (t - state.lastTime) / 1000;
+  state.lastTime = t;
+  if (dt > 0.05) dt = 0.05;
+
+  state.paused = anyOverlayOpen();
+  if (state.paused) return;
+  if (state.currentRoom !== 'B') return;
+
+  // 移动（键盘 / 摇杆统一输入）
+  const rawVec = computeMoveVector();
+  const dir = dirFromVector(rawVec);
+  updateMazeMovement(dir, dt);
+
+  // 朝向：每帧由原始输入向量决定（参考 VIRTUAL-JOYSTICK §8.3）
+  // 向右（含右上/右下斜向）→ 右视图；其余（左/上/下）→ 左视图；静止保持当前朝向
+  if (rawVec && (Math.abs(rawVec.x) >= 0.01 || Math.abs(rawVec.y) >= 0.01)) {
+    if (rawVec.x > 0) setFacing('right'); else setFacing('left');
+  }
+
+  // 巡逻怪移动
+  updatePatrols(dt);
+
+  // 收集 / 气泡 / 受伤 / 血量归零
+  checkMazeCollisions();
+
+  renderPlayer();
+}
+
+// ============================================================
+// 手动拖拽引擎（模板 §5）
+// ============================================================
+let dragCursorFollower = null;
+let dragState = null;
+let justDragged = false;
+
+function ensureCursorFollower() {
+  if (!dragCursorFollower) {
+    dragCursorFollower = document.createElement('div');
+    dragCursorFollower.id = 'drag-cursor-follower';
+    dragCursorFollower.style.backgroundImage = "url('images/cursor-grabbing.png')";
+    document.body.appendChild(dragCursorFollower);
+  }
+}
+function removeCursorFollower() { if (dragCursorFollower) { dragCursorFollower.remove(); dragCursorFollower = null; } }
+function cleanupDrag() {
+  if (dragState && dragState.clone) dragState.clone.remove();
+  if (dragState && dragState.started) {
+    justDragged = true;
+    setTimeout(function() { justDragged = false; }, 0);
+  }
+  dragState = null;
+  document.body.classList.remove('dragging');
+  removeCursorFollower();
+  document.querySelectorAll('.drag-over-target').forEach(function(el) { el.classList.remove('drag-over-target'); });
+}
+
+function startManualDrag(e) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  if (anyOverlayOpen()) return;
+  const itemEl = e.currentTarget;
+  const itemId = itemEl.getAttribute('data-item-id');
+  if (!itemId) return;
+  const clone = document.createElement('div');
+  clone.style.cssText = `
+    position: fixed; pointer-events: none; z-index: 99998;
+    width: ${itemEl.offsetWidth}px; height: ${itemEl.offsetHeight}px;
+    background-image: ${itemEl.style.backgroundImage};
+    background-size: contain; background-repeat: no-repeat; background-position: center;
+    opacity: 0.85; display: none; transform: translate(-50%, -50%);
+  `;
+  document.body.appendChild(clone);
+  dragState = { itemId: itemId, sourceEl: itemEl, startX: e.clientX, startY: e.clientY, started: false, clone: clone };
+}
+
+document.addEventListener('mousemove', function(e) {
+  if (!dragState) return;
+  const dx = e.clientX - dragState.startX, dy = e.clientY - dragState.startY;
+  if (!dragState.started) {
+    if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+    dragState.started = true;
+    document.body.classList.add('dragging');
+    ensureCursorFollower();
+    dragState.clone.style.display = 'block';
+  }
+  dragState.clone.style.left = e.clientX + 'px';
+  dragState.clone.style.top = e.clientY + 'px';
+  if (dragCursorFollower) { dragCursorFollower.style.left = e.clientX + 'px'; dragCursorFollower.style.top = e.clientY + 'px'; }
+  const elUnder = document.elementFromPoint(e.clientX, e.clientY);
+  const dropTarget = elUnder && elUnder.closest && elUnder.closest('[data-drop-target]');
+  document.querySelectorAll('.drag-over-target').forEach(function(el) { if (el !== dropTarget) el.classList.remove('drag-over-target'); });
+  if (dropTarget && !dropTarget.classList.contains('drag-over-target')) dropTarget.classList.add('drag-over-target');
+});
+
+document.addEventListener('mouseup', function(e) {
+  if (!dragState) return;
+  if (dragState.started) {
+    const elUnder = document.elementFromPoint(e.clientX, e.clientY);
+    const dropTarget = elUnder && elUnder.closest && elUnder.closest('[data-drop-target]');
+    if (dropTarget) handleDrop(dragState.itemId, dropTarget.dataset.dropTarget, dropTarget);
+  }
+  cleanupDrag();
+});
+
+document.getElementById('game-container').addEventListener('mouseleave', function() { if (dragState) cleanupDrag(); });
+
+// ---- Touch Drag ----
+function touchStart(e) {
+  if (e.touches.length !== 1) return;
+  if (anyOverlayOpen()) return;
+  const touch = e.touches[0];
+  const itemEl = e.currentTarget;
+  const itemId = itemEl.getAttribute('data-item-id');
+  if (!itemId) return;
+  const clone = document.createElement('div');
+  clone.style.cssText = `
+    position: fixed; pointer-events: none; z-index: 99998;
+    width: ${itemEl.offsetWidth}px; height: ${itemEl.offsetHeight}px;
+    background-image: ${itemEl.style.backgroundImage};
+    background-size: contain; background-repeat: no-repeat; background-position: center;
+    opacity: 0.85; display: block; transform: translate(-50%, -50%);
+    left: ${touch.clientX}px; top: ${touch.clientY}px;
+  `;
+  document.body.appendChild(clone);
+  dragState = { itemId: itemId, sourceEl: itemEl, startX: touch.clientX, startY: touch.clientY, started: true, clone: clone };
+  document.body.classList.add('dragging');
+  ensureCursorFollower();
+  if (dragCursorFollower) { dragCursorFollower.style.left = touch.clientX + 'px'; dragCursorFollower.style.top = touch.clientY + 'px'; }
+  e.preventDefault();
+}
+
+document.addEventListener('touchmove', function(e) {
+  if (!dragState || !dragState.started) return;
+  const touch = e.touches[0];
+  dragState.clone.style.left = touch.clientX + 'px';
+  dragState.clone.style.top = touch.clientY + 'px';
+  if (dragCursorFollower) { dragCursorFollower.style.left = touch.clientX + 'px'; dragCursorFollower.style.top = touch.clientY + 'px'; }
+  const elUnder = document.elementFromPoint(touch.clientX, touch.clientY);
+  const dropTarget = elUnder && elUnder.closest && elUnder.closest('[data-drop-target]');
+  document.querySelectorAll('.drag-over-target').forEach(function(el) { if (el !== dropTarget) el.classList.remove('drag-over-target'); });
+  if (dropTarget && !dropTarget.classList.contains('drag-over-target')) dropTarget.classList.add('drag-over-target');
+}, { passive: false });
+
+document.addEventListener('touchend', function(e) {
+  if (!dragState) return;
+  if (dragState.started) {
+    const touch = e.changedTouches[0];
+    const elUnder = document.elementFromPoint(touch.clientX, touch.clientY);
+    const dropTarget = elUnder && elUnder.closest && elUnder.closest('[data-drop-target]');
+    if (dropTarget) handleDrop(dragState.itemId, dropTarget.dataset.dropTarget, dropTarget);
+  }
+  cleanupDrag();
+});
+
+// ---- Inventory Scroll Drag ----
+(function initInventoryScroll() {
+  const inv = document.getElementById('ui-inventory');
+  let isDragging = false, startY = 0, scrollTop = 0;
+  inv.addEventListener('mousedown', function(ev) {
+    if (ev.target.classList.contains('inv-item')) return;
+    isDragging = true; startY = ev.clientY; scrollTop = inv.scrollTop;
+    inv.style.cursor = "url('images/cursor-grabbing.png') 16 16, grabbing";
+    ev.preventDefault();
+  });
+  document.addEventListener('mousemove', function(ev) {
+    if (!isDragging) return;
+    inv.scrollTop = scrollTop - (ev.clientY - startY) * 1.5;
+  });
+  document.addEventListener('mouseup', function() { isDragging = false; inv.style.cursor = ''; });
+  inv.addEventListener('mouseleave', function() { isDragging = false; inv.style.cursor = ''; });
+})();
+
+// ============================================================
+// 初始化
+// ============================================================
+function initGame() {
+  state.playerEl = document.getElementById('entity-player');
+
+  loadSettings();
+  buildMaze();                 // 随机迷宫 + NPC 分布（每次打开页面重新随机）
+  attachDialogClickHandler();
+  updateNavVisibility();
+  renderInventory();
+  renderBackpack();
+  renderPlayer();
+  setHp(10);
+  updateNPC1DropTarget();
+  showJoystick();
+
+  document.getElementById('entity-npc1').addEventListener('click', function(e) {
+    if (justDragged) return;
+    handleNPC1Click();
+  });
+
+  requestAnimationFrame(gameLoop);
+
+  // 横屏提示
+  document.getElementById('landscape-hint').addEventListener('click', function(e) { if (e.target === e.currentTarget) dismissLandscapeHint(); });
+  document.getElementById('landscape-hint-close').addEventListener('click', dismissLandscapeHint);
+
+  // 首交互启动 BGM
+  const startBgmOnInteract = function() {
+    if (musicVolume > 0.01) startBgm();
+    document.removeEventListener('click', startBgmOnInteract);
+    document.removeEventListener('touchstart', startBgmOnInteract);
+  };
+  document.addEventListener('click', startBgmOnInteract);
+  document.addEventListener('touchstart', startBgmOnInteract);
+
+  console.log('🎮 华旺发商城 — Rusty Lake inspired point & click game');
+  console.log('  Room A: 点击 NPC1 接下任务 → 向右进入 Room B');
+  console.log('  Room B: 吃豆人迷宫，WASD/方向键或摇杆移动，收集发光的假二次元，穿过出口返回');
+  console.log('  Room A: 把 4 个假二次元拖给 NPC1 销毁，获得「真二次元周边」即通关');
+}
+
+window.addEventListener('DOMContentLoaded', initGame);
+</script>
+</body>
+</html>
