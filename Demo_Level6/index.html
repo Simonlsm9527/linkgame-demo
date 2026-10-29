@@ -1,0 +1,1334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>噪起来堕落街</title>
+<style>
+/* ============================================================
+   Demo_Level6 — 失序乐队 · 听声寻乐
+   架构 / UI / 输出标准严格参考 framework/GAME-TEMPLATE.md（不增不减）
+   占位图/占位音频按模板 §10 规则生成：纯技术占位，无概念层创作
+   ============================================================ */
+
+/* ---------- 3.1 画布缩放 ---------- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #0a0a0a; overflow: hidden;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  width: 100vw; height: 100vh;
+  user-select: none; -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#game-container {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%); transform-origin: center center;
+  width: 1280px; height: 720px;
+  background: #222; overflow: hidden;
+  box-shadow: 0 0 20px rgba(0,0,0,0.8);
+  cursor: url('images/cursor-default.png') 2 2, auto;
+}
+
+/* ---------- 3.2 区域划分 ---------- */
+#room-area { width: 1120px; height: 720px; position: relative; overflow: hidden; background: #444; }
+#ui-inventory {
+  width: 160px; height: 720px;
+  background-image: url('images/ui-inventory-bg.png'); background-size: cover;
+  border-left: 2px solid #000;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 15px 0; gap: 15px;
+  overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none;
+}
+#ui-inventory::-webkit-scrollbar { display: none; }
+
+/* ---------- 3.3 房间系统（占位背景图，见 §10.1） ---------- */
+.room { display: none; position: absolute; top: 0; left: 0;
+  width: 1120px; height: 720px;
+  background-size: cover; background-position: center; background-repeat: no-repeat; }
+.room.active-room { display: block; }
+#room-A { background-image: url('images/room-A-bg.png'); }
+#room-B { background-image: url('images/room-B-bg.png'); }
+#room-C { background-image: url('images/room-C-bg.png'); }
+#room-D { background-image: url('images/room-D-bg.png'); }
+
+/* ---------- 3.4 实体基类 ---------- */
+.entity {
+  position: absolute;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+}
+.clickable { transition: filter 0.2s; }
+.clickable:hover { filter: brightness(1.2); }
+
+/* ---------- NPC 实体（占位图，几何：左侧 1/3，373×560，底边贴地） ---------- */
+.npc { left: 66px; top: 160px; width: 373px; height: 560px; z-index: 10; }
+#npc-1 { background-image: url('images/npc-1.png'); }
+#npc-2 { background-image: url('images/npc-2.png'); }
+#npc-3 { background-image: url('images/npc-3.png'); }
+#npc-4 { background-image: url('images/npc-4.png'); }
+
+/* ---------- 声音气泡实体（可点可拖，占位图，方形） ---------- */
+.bubble { z-index: 12; touch-action: none; }
+.bubble.solved { opacity: 0; transition: opacity 0.38s ease; }
+
+/* ---------- 3.5 对话框 ---------- */
+#dialog-box {
+  position: absolute; bottom: 40px; left: 160px;
+  width: 800px; min-height: 70px;
+  background: rgba(255,255,255,0.95); border: 3px solid #333; border-radius: 15px;
+  color: #000; font-size: 20px; line-height: 1.7;
+  padding: 20px; z-index: 10001; display: none;
+  text-align: center; box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+}
+#dialog-box.visible { display: block; animation: dialogIn 0.35s ease-out; }
+@keyframes dialogIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+/* 对话框模态锁：对话框显示期间锁定整个游戏界面，仅对话框本身可点击 */
+#dialog-lock {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  z-index: 10000; display: none;
+}
+#dialog-lock.show { display: block; }
+
+/* ---------- 3.5b 对话气泡（环境吐槽） ---------- */
+.speech-bubble {
+  position: absolute;
+  background: rgba(30, 20, 40, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  color: #ccc;
+  font-size: 20px;
+  padding: 8px 20px;
+  z-index: 190;
+  display: none;
+  white-space: nowrap;
+}
+.speech-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -8px; left: 50%;
+  transform: translateX(-50%);
+  width: 0; height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 8px solid rgba(30, 20, 40, 0.9);
+}
+.speech-bubble.show { display: block; animation: bubbleIn 0.2s ease-out; }
+@keyframes bubbleIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- 3.6 导航按钮 ---------- */
+.nav-btn {
+  position: absolute; top: 335px;
+  width: 50px; height: 60px;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  z-index: 150; opacity: 0.7; transition: opacity 0.3s, transform 0.2s; display: none;
+}
+.nav-btn:hover { filter: brightness(1.2); }
+.nav-btn.visible { display: block; }
+#nav-left  { left: 12px;  background-image: url('images/nav-left.png'); }
+#nav-right { right: 12px; background-image: url('images/nav-right.png'); }
+
+/* ---------- 3.7 物品栏 ---------- */
+.inv-slot { width: 120px; height: 120px; background: rgba(0,0,0,0.3);
+  border-radius: 5px; flex-shrink: 0; position: relative;
+  display: flex; align-items: center; justify-content: center; }
+.inv-slot:empty { border-style: dashed; }
+.inv-item {
+  width: 100%; height: 100%;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  border-radius: 3px;
+  cursor: url('images/cursor-grab.png') 16 16, grab;
+}
+.inv-count {
+  position: absolute; bottom: 5px; right: 8px;
+  background: rgba(0,0,0,0.7); color: #ffd700;
+  font-size: 14px; font-weight: bold;
+  padding: 1px 6px; border-radius: 8px; pointer-events: none;
+}
+
+/* ---------- 3.8 设置按钮 & 面板 ---------- */
+#settings-btn {
+  position: absolute;
+  top: 12px;
+  right: 172px;
+  width: 42px; height: 42px;
+  z-index: 300;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.55);
+  border: 2px solid rgba(255,255,255,0.35);
+  display: flex; justify-content: center; align-items: center;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+#settings-btn:hover {
+  background: rgba(0,0,0,0.75);
+  border-color: rgba(255,255,255,0.6);
+  transform: rotate(30deg);
+}
+#settings-btn svg { width: 24px; height: 24px; fill: rgba(255,255,255,0.85); }
+#settings-overlay {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  z-index: 400; display: none;
+  align-items: center; justify-content: center;
+}
+#settings-overlay.show { display: flex; }
+#settings-panel {
+  position: relative; width: 400px;
+  background: rgba(20, 20, 30, 0.92);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  padding: 32px 36px 28px;
+  color: #e0e0e0;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  pointer-events: auto; box-sizing: border-box;
+}
+#settings-panel h3 { text-align: center; margin-bottom: 24px; font-size: 22px; font-weight: 500; letter-spacing: 2px; color: #fff; }
+#settings-close-btn {
+  position: absolute; top: 10px; right: 16px;
+  width: 32px; height: 32px;
+  background: none; border: none;
+  color: #999; font-size: 24px;
+  transition: color 0.2s;
+  line-height: 32px; text-align: center; padding: 0;
+}
+#settings-close-btn:hover { color: #fff; }
+.setting-row { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.vol-icon { width: 22px; height: 22px; opacity: 0.7; flex-shrink: 0; }
+.vol-label { width: 56px; text-align: right; font-size: 15px; color: #bbb; flex-shrink: 0; }
+.setting-row input[type="range"] {
+  flex: 1; height: 6px;
+  -webkit-appearance: none; appearance: none;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 3px; outline: none;
+}
+.setting-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #fff; border: 2px solid #888;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s ease;
+}
+.setting-row input[type="range"]::-webkit-slider-thumb:hover { filter: brightness(1.2); }
+.setting-row input[type="range"]::-moz-range-thumb {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #fff; border: 2px solid #888;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+.setting-row input[type="range"]::-moz-range-thumb:hover { filter: brightness(1.2); }
+.vol-value { width: 36px; text-align: center; font-size: 14px; color: #aaa; flex-shrink: 0; }
+#settings-link-btn {
+  width: 100%; margin-top: 24px; padding: 12px 0;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 10px; color: #ddd;
+  font-size: 16px; letter-spacing: 1px;
+  text-align: center; transition: all 0.2s ease;
+}
+#settings-link-btn:hover { background: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.45); color: #fff; }
+
+/* ---------- 3.9 背包按钮 & 面板 ---------- */
+#backpack-btn {
+  position: absolute;
+  top: 12px;
+  left: 1016px;
+  width: 42px; height: 42px;
+  background: rgba(0,0,0,0.55);
+  border: 2px solid rgba(255,255,255,0.35);
+  border-radius: 50%;
+  z-index: 300;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+#backpack-btn:hover { background: rgba(0,0,0,0.75); border-color: rgba(255,255,255,0.6); }
+#backpack-btn svg { width: 24px; height: 24px; fill: rgba(255,255,255,0.85); }
+#backpack-overlay {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  z-index: 400; display: none;
+  align-items: center; justify-content: center;
+}
+#backpack-overlay.show { display: flex; }
+#backpack-panel {
+  position: relative; width: 360px;
+  background: rgba(20, 20, 30, 0.94);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  padding: 28px 30px 30px;
+  color: #e0e0e0;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  pointer-events: auto; box-sizing: border-box;
+  text-align: center;
+}
+#backpack-panel h3 { text-align: center; margin-bottom: 22px; font-size: 22px; font-weight: 500; letter-spacing: 2px; color: #fff; }
+#backpack-close-btn {
+  position: absolute; top: 10px; right: 16px;
+  width: 32px; height: 32px;
+  background: none; border: none;
+  color: #999; font-size: 24px;
+  transition: color 0.2s;
+  line-height: 32px; text-align: center; padding: 0;
+}
+#backpack-close-btn:hover { color: #fff; }
+#backpack-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.bp-slot {
+  width: 92px; height: 92px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto;
+}
+.bp-slot:empty { border: 1px dashed rgba(255, 255, 255, 0.22); }
+.bp-item {
+  width: 100%; height: 100%;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  border-radius: 4px;
+}
+
+/* ---------- 3.10 道具拾取弹窗（严格模态） ---------- */
+#pickup-overlay {
+  position: absolute; top: 0; left: 0;
+  width: 1120px; height: 720px;
+  background: rgba(0,0,0,0.7); z-index: 350; display: none;
+  align-items: center; justify-content: center;
+}
+#pickup-overlay.visible { display: flex; }
+#pickup-panel {
+  background: #1a1a2e; border: 2px solid #555; border-radius: 16px;
+  padding: 30px 40px; width: 300px; color: #fff;
+  text-align: center;
+}
+#pickup-panel h3 { margin-bottom: 20px; font-size: 20px; letter-spacing: 2px; }
+#pickup-item-img {
+  width: 100px; height: 100px;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  margin: 0 auto 12px;
+}
+#pickup-item-name { font-size: 16px; color: #ccc; margin-bottom: 24px; }
+#pickup-confirm-btn {
+  padding: 10px 40px;
+  border: none; border-radius: 8px;
+  background: #4a9eff;
+  color: #fff; font-size: 15px; cursor: url('images/cursor-default.png') 2 2, auto; letter-spacing: 2px;
+  transition: filter 0.2s;
+}
+#pickup-confirm-btn:hover { filter: brightness(1.2); }
+
+/* ---------- 3.11 横屏提示遮罩 ---------- */
+#landscape-hint {
+  position: fixed; inset: 0;
+  background: #0a0a0a;
+  z-index: 100000;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  color: #fff;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  text-align: center;
+  user-select: none; -webkit-user-select: none;
+}
+#landscape-hint.show { display: flex; }
+#landscape-hint-icon { width: 76px; height: 76px; animation: hintLockPulse 1.8s ease-in-out infinite; }
+@keyframes hintLockPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+#landscape-hint p { font-size: 18px; letter-spacing: 2px; opacity: 0.85; }
+#landscape-hint .hint-sub { font-size: 13px; opacity: 0.5; letter-spacing: 1px; }
+#landscape-hint-close {
+  margin-top: 8px;
+  padding: 10px 40px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 24px;
+  color: #ddd;
+  font-size: 15px;
+  letter-spacing: 2px;
+  cursor: url('images/cursor-default.png') 2 2, auto;
+  transition: background 0.2s, color 0.2s;
+}
+#landscape-hint-close:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+/* ---------- 4. 自定义鼠标指针系统 ---------- */
+/* 统一：原生控件（<button>、滑块等）不继承自定义指针，这里显式指定 */
+button, input[type="range"] { cursor: url('images/cursor-default.png') 2 2, auto; }
+html.dragging, body.dragging, body.dragging * { cursor: none !important; }
+#drag-cursor-follower {
+  position: fixed; pointer-events: none; z-index: 99999;
+  width: 32px; height: 32px;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  transform: translate(-16px, -16px);
+}
+body.dragging .drag-over-target { filter: brightness(1.3) drop-shadow(0 0 6px cyan); }
+#return-btn {
+  position: absolute;
+  top: 12px; left: 12px;
+  width: 42px; height: 42px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  z-index: 300;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+#return-btn:hover { background: rgba(0, 0, 0, 0.75); border-color: rgba(255, 255, 255, 0.6); }
+#return-btn svg { width: 24px; height: 24px; fill: rgba(255, 255, 255, 0.85); }
+</style>
+</head>
+<body>
+
+<!-- ========== 音频（放在 body 最前面） ========== -->
+<audio id="sfx-click" src="audio/sfx-click.mp3" preload="auto"></audio>
+<audio id="sfx-nav" src="audio/sfx-nav.mp3" preload="auto"></audio>
+<audio id="sfx-dialogue" src="audio/sfx-dialogue.mp3" preload="auto"></audio>
+<audio id="sfx-collect" src="audio/sfx-collect.mp3" preload="auto"></audio>
+<audio id="sfx-wrong" src="audio/sfx-wrong.mp3" preload="auto"></audio>
+<audio id="sfx-win" src="audio/sfx-win.mp3" preload="auto"></audio>
+<!-- 参考音频 -->
+<audio id="au-ref1" src="audio/ref1.mp3" preload="auto"></audio>
+<audio id="au-ref2" src="audio/ref2.mp3" preload="auto"></audio>
+<audio id="au-ref3" src="audio/ref3.mp3" preload="auto"></audio>
+<audio id="au-ref4" src="audio/ref4.mp3" preload="auto"></audio>
+<!-- 气泡音频（正确气泡复用对应参考音频，不重复占用） -->
+<audio id="au-bubble-a1" src="audio/bubble-a1.mp3" preload="auto"></audio>
+<audio id="au-bubble-a3" src="audio/bubble-a3.mp3" preload="auto"></audio>
+<audio id="au-bubble-b1" src="audio/bubble-b1.mp3" preload="auto"></audio>
+<audio id="au-bubble-b2" src="audio/bubble-b2.mp3" preload="auto"></audio>
+<audio id="au-bubble-b4" src="audio/bubble-b4.mp3" preload="auto"></audio>
+<audio id="au-bubble-c1" src="audio/bubble-c1.mp3" preload="auto"></audio>
+<audio id="au-bubble-c2" src="audio/bubble-c2.mp3" preload="auto"></audio>
+<audio id="au-bubble-c3" src="audio/bubble-c3.mp3" preload="auto"></audio>
+<audio id="au-bubble-c5" src="audio/bubble-c5.mp3" preload="auto"></audio>
+<audio id="au-bubble-d1" src="audio/bubble-d1.mp3" preload="auto"></audio>
+<audio id="au-bubble-d2" src="audio/bubble-d2.mp3" preload="auto"></audio>
+<audio id="au-bubble-d3" src="audio/bubble-d3.mp3" preload="auto"></audio>
+<audio id="au-bubble-d4" src="audio/bubble-d4.mp3" preload="auto"></audio>
+<audio id="au-bubble-d6" src="audio/bubble-d6.mp3" preload="auto"></audio>
+
+<!-- ========== 游戏容器（唯一顶层） ========== -->
+<div id="game-container">
+
+  <!-- 场景区域 1120×720 -->
+  <div id="room-area">
+
+    <!-- ============ roomA ============ -->
+    <div id="room-A" class="room active-room">
+      <div id="npc-1" class="entity npc clickable" data-drop-target="npc-1" onclick="onNpcClick('A')"></div>
+    </div>
+
+    <!-- ============ roomB ============ -->
+    <div id="room-B" class="room">
+      <div id="npc-2" class="entity npc clickable" data-drop-target="npc-2" onclick="onNpcClick('B')"></div>
+    </div>
+
+    <!-- ============ roomC ============ -->
+    <div id="room-C" class="room">
+      <div id="npc-3" class="entity npc clickable" data-drop-target="npc-3" onclick="onNpcClick('C')"></div>
+    </div>
+
+    <!-- ============ roomD ============ -->
+    <div id="room-D" class="room">
+      <div id="npc-4" class="entity npc clickable" data-drop-target="npc-4" onclick="onNpcClick('D')"></div>
+    </div>
+
+    <!-- 对话框（底部中央，正式对话） -->
+    <div id="dialog-box"></div>
+
+    <!-- 导航箭头 -->
+    <div id="nav-left" class="nav-btn" onclick="changeRoom(-1)"></div>
+    <div id="nav-right" class="nav-btn" onclick="changeRoom(1)"></div>
+  </div>
+
+  <!-- 物品栏 160×720 -->
+  <div id="ui-inventory"></div>
+
+  <!-- 对话框模态锁：对话框显示期间锁定整个游戏界面 -->
+  <div id="dialog-lock"></div>
+
+  <!-- 背包按钮 -->
+  <div id="backpack-btn" onclick="toggleBackpack()" style="display:none">
+    <svg viewBox="0 0 24 24"><path d="M20 6h-4V4c0-1.1-.9-2-2-2h-4c-1.1 0-2 .9-2 2v2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zM10 4h4v2h-4V4zm10 16H4V8h16v12z"/><path d="M9 12h2v2H9zm4 0h2v2h-2z"/></svg>
+  </div>
+
+  <!-- 设置按钮 -->
+    <!-- 返回 Level0 -->
+  <div id="return-btn" onclick="returnToLevel0()">
+    <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+  </div>
+<div id="settings-btn" onclick="toggleSettings()">
+    <svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
+  </div>
+
+  <!-- 设置覆盖层 -->
+  <div id="settings-overlay" onclick="if(event.target===this)toggleSettings()">
+    <div id="settings-panel" onclick="event.stopPropagation()">
+      <button id="settings-close-btn" onclick="toggleSettings()">&times;</button>
+      <h3>设 置</h3>
+      <div class="setting-row">
+        <svg class="vol-icon" viewBox="0 0 24 24" fill="rgba(255,255,255,0.7)"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+        <span class="vol-label">音乐</span>
+        <input type="range" id="vol-music" min="0" max="100" value="70" oninput="onMusicVolume(this.value)">
+        <span class="vol-value" id="vol-music-label">70</span>
+      </div>
+      <div class="setting-row">
+        <svg class="vol-icon" viewBox="0 0 24 24" fill="rgba(255,255,255,0.7)"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+        <span class="vol-label">音效</span>
+        <input type="range" id="vol-sfx" min="0" max="100" value="80" oninput="onSfxVolume(this.value)">
+        <span class="vol-value" id="vol-sfx-label">80</span>
+      </div>
+      <button id="settings-link-btn" onclick="openExternalLink()">查看更多内容 →</button>
+    </div>
+  </div>
+
+  <!-- 背包覆盖层 -->
+  <div id="backpack-overlay" onclick="if(event.target===this)toggleBackpack()">
+    <div id="backpack-panel" onclick="event.stopPropagation()">
+      <button id="backpack-close-btn" onclick="toggleBackpack()">&times;</button>
+      <h3>背 包</h3>
+      <div id="backpack-grid">
+        <div class="bp-slot"></div><div class="bp-slot"></div><div class="bp-slot"></div>
+        <div class="bp-slot"></div><div class="bp-slot"></div><div class="bp-slot"></div>
+        <div class="bp-slot"></div><div class="bp-slot"></div><div class="bp-slot"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 道具拾取弹窗（严格模态：无关闭按钮、不可点击外部关闭、不自动消失、确认后才入包） -->
+  <div id="pickup-overlay">
+    <div id="pickup-panel">
+      <h3>已回收至背包</h3>
+      <div id="pickup-item-img"></div>
+      <div id="pickup-item-name"></div>
+      <button id="pickup-confirm-btn" onclick="confirmPickup()">确 认</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- 横屏提示：建议锁定旋屏（一次性、可关闭、6 秒自动消失） -->
+<div id="landscape-hint">
+  <svg id="landscape-hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+  </svg>
+  <p>建议锁定竖屏再把手机横过来</p>
+  <p class="hint-sub">游玩体验更佳</p>
+  <button id="landscape-hint-close">知道了</button>
+</div>
+
+<script>
+// ============================================================
+// ① 设备识别（必须放在 <script> 最顶部，先于 resizeGame()）
+// ============================================================
+(function detectDevice() {
+  const ua = navigator.userAgent;
+  const isIOS     = /iPhone|iPad|iPod/i.test(ua);
+  const isAndroid = /Android/i.test(ua);
+  const isMac     = /Mac/i.test(ua) && !isIOS;
+  const isWindows = /Windows/i.test(ua);
+  const isTablet   = /iPad/i.test(ua) || (isAndroid && !/Mobile/i.test(ua));
+  const isMobileUA = /Mobi|Android|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  const isTouch    = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  const coarsePtr  = window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : false;
+  const noHover    = window.matchMedia ? window.matchMedia('(hover: none)').matches : false;
+  const isTouchPrimary = coarsePtr && noHover;
+  const isMobile   = isMobileUA || isTouchPrimary;
+  const isWeChat  = /MicroMessenger/i.test(ua);
+  const isQQ      = /QQ\//i.test(ua);
+  const isSafari  = /Safari/i.test(ua) && !/Chrome|CriOS|Edg|OPR/i.test(ua);
+  const isChrome  = /Chrome|CriOS/i.test(ua) && !/Edg|OPR/i.test(ua);
+  const isEdge    = /Edg/i.test(ua);
+  const isFirefox = /Firefox/i.test(ua);
+  const isPortrait = window.matchMedia
+    ? window.matchMedia('(orientation: portrait)').matches
+    : window.innerHeight > window.innerWidth;
+  window.deviceInfo = {
+    isMobile, isTablet, isMobileDevice: isMobile || isTablet, isDesktop: !isMobile && !isTablet,
+    isTouch, isIOS, isAndroid, isMac, isWindows,
+    isWeChat, isQQ, isSafari, isChrome, isEdge, isFirefox,
+    isPortrait, isLandscape: !isPortrait,
+    os: isIOS ? 'ios' : isAndroid ? 'android' : isWindows ? 'windows' : isMac ? 'mac' : 'other',
+    browser: isWeChat ? 'wechat' : isQQ ? 'qq' : isSafari ? 'safari'
+           : isEdge ? 'edge' : isFirefox ? 'firefox' : isChrome ? 'chrome' : 'other',
+    type: isMobile ? 'mobile' : isTablet ? 'tablet' : 'desktop'
+  };
+  const root = document.documentElement;
+  root.classList.add('device-' + deviceInfo.type);
+  root.setAttribute('data-device', deviceInfo.type);
+  if (deviceInfo.isTouch)     root.classList.add('device-touch');
+  if (deviceInfo.isIOS)       root.classList.add('device-ios');
+  if (deviceInfo.isAndroid)   root.classList.add('device-android');
+  if (deviceInfo.isWeChat)    root.classList.add('device-wechat');
+  if (deviceInfo.isPortrait)  root.classList.add('device-portrait');
+  else                        root.classList.add('device-landscape');
+})();
+
+// ============================================================
+// ② 画布缩放 + 移动端强制横屏（必须放在设备识别之后）
+// ============================================================
+function resizeGame() {
+  const gc = document.getElementById('game-container');
+  const rotated = deviceInfo.isMobileDevice && deviceInfo.isPortrait;
+  let s;
+  if (rotated) {
+    s = Math.min(window.innerHeight / 1280, window.innerWidth / 720);
+    gc.style.transform = `translate(-50%, -50%) rotate(90deg) scale(${s})`;
+  } else {
+    s = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+    gc.style.transform = `translate(-50%, -50%) scale(${s})`;
+  }
+  gc.classList.toggle('rotated', rotated);
+  window._gameScale = s;
+}
+window.addEventListener('resize', resizeGame);
+resizeGame();
+
+// ============================================================
+// ③ 方向监听 + 横屏锁屏提示
+// ============================================================
+let landscapeHintDismissed = false;
+let landscapeHintTimer = null;
+
+function updateLandscapeHint() {
+  const hint = document.getElementById('landscape-hint');
+  if (!hint) return;
+  const shouldShow = deviceInfo.isMobileDevice && deviceInfo.isLandscape && !landscapeHintDismissed;
+  if (shouldShow && !hint.classList.contains('show')) {
+    hint.classList.add('show');
+    if (landscapeHintTimer) clearTimeout(landscapeHintTimer);
+    landscapeHintTimer = setTimeout(dismissLandscapeHint, 6000);
+  } else if (!shouldShow) {
+    hint.classList.remove('show');
+  }
+}
+function dismissLandscapeHint() {
+  landscapeHintDismissed = true;
+  if (landscapeHintTimer) { clearTimeout(landscapeHintTimer); landscapeHintTimer = null; }
+  const hint = document.getElementById('landscape-hint');
+  if (hint) hint.classList.remove('show');
+}
+function updateOrientation() {
+  const isPortrait = window.matchMedia
+    ? window.matchMedia('(orientation: portrait)').matches
+    : (window.innerHeight > window.innerWidth);
+  deviceInfo.isPortrait = isPortrait;
+  deviceInfo.isLandscape = !isPortrait;
+  const root = document.documentElement;
+  root.classList.toggle('device-portrait', isPortrait);
+  root.classList.toggle('device-landscape', !isPortrait);
+  resizeGame();
+  updateLandscapeHint();
+}
+window.addEventListener('resize', updateOrientation);
+window.addEventListener('orientationchange', updateOrientation);
+if (window.screen && screen.orientation && screen.orientation.addEventListener) {
+  screen.orientation.addEventListener('change', updateOrientation);
+}
+updateOrientation();
+
+// ============================================================
+// ⑥.7 音频全局变量（必须放在 script 顶部区域）
+// ============================================================
+let sfxVolume = 0.8;
+let musicVolume = 0.7;
+let audioCtx = null;
+
+// ============================================================
+// 全局工具
+// ============================================================
+function $(id) { return document.getElementById(id); }
+
+// ============================================================
+// ⑥.1 全局状态 + 房间配置
+// ============================================================
+const STORAGE_PREFIX = 'band_noise_';
+// 音量设置在所有关卡间共用（与 Demo_Level0 同一对键）
+const VOLUME_PREFIX = 'linkgame_';
+const rooms = ['A', 'B', 'C', 'D'];
+
+const ROOMS = {
+  A: {
+    npc: {
+      id: 'npc-1',
+      dialog: '这条街怎么变得这么吵了！我们都听不到我们的歌了！帮忙把它找出来！',
+      ref: 'au-ref1',
+      wrong: '不对！你再仔细听！',
+      unplayed: '你还没听过呢！'
+    },
+    bubbles: [
+      { id: 'a1', audio: 'au-bubble-a1' },
+      { id: 'a2', audio: 'au-ref1' },       // 正确 → 复用参考音频1
+      { id: 'a3', audio: 'au-bubble-a3' }
+    ],
+    correct: 'a2',
+    next: 'B'
+  },
+  B: {
+    npc: {
+      id: 'npc-2',
+      dialog: '我很喜欢我的主题曲！现在我听不到了！',
+      ref: 'au-ref2',
+      wrong: '不对！你再仔细听！',
+      unplayed: '你先听听呢！'
+    },
+    bubbles: [
+      { id: 'b1', audio: 'au-bubble-b1' },
+      { id: 'b2', audio: 'au-bubble-b2' },
+      { id: 'b3', audio: 'au-ref2' },       // 正确 → 复用参考音频2
+      { id: 'b4', audio: 'au-bubble-b4' }
+    ],
+    correct: 'b3',
+    next: 'C'
+  },
+  C: {
+    npc: {
+      id: 'npc-3',
+      dialog: '这歌可是我专门请了营销专家写的。',
+      ref: 'au-ref3',
+      wrong: '不对！你再仔细听！',
+      unplayed: '你还没听过呢！'
+    },
+    bubbles: [
+      { id: 'c1', audio: 'au-bubble-c1' },
+      { id: 'c2', audio: 'au-bubble-c2' },
+      { id: 'c3', audio: 'au-bubble-c3' },
+      { id: 'c4', audio: 'au-ref3' },       // 正确 → 复用参考音频3
+      { id: 'c5', audio: 'au-bubble-c5' }
+    ],
+    correct: 'c4',
+    next: 'D'
+  },
+  D: {
+    npc: {
+      id: 'npc-4',
+      dialog: '我的广告曲！快帮我把它找回来！',
+      ref: 'au-ref4',
+      wrong: '不对！你再仔细听！',
+      unplayed: '你还没听过呢！'
+    },
+    bubbles: [
+      { id: 'd1', audio: 'au-bubble-d1' },
+      { id: 'd2', audio: 'au-bubble-d2' },
+      { id: 'd3', audio: 'au-bubble-d3' },
+      { id: 'd4', audio: 'au-bubble-d4' },
+      { id: 'd5', audio: 'au-ref4' },       // 正确 → 复用参考音频4
+      { id: 'd6', audio: 'au-bubble-d6' }
+    ],
+    correct: 'd5',
+    next: null
+  }
+};
+
+const state = {
+  inventory: [],        // [{id, count}]
+  backpack: [],         // id[] (max 9)
+  currentRoomIndex: 0,
+  solved: {},           // 房间是否已通关 {A:true,...}
+  npcClicks: {},        // NPC 点击次数
+  heard: {},            // 气泡是否播放过 {bubbleId:true}
+  refHeard: {},         // 本房间 NPC 参考音乐是否已听过 {roomKey:true}
+  hasBeatBadge: false,
+  done: false
+};
+
+// ============================================================
+// ⑥.2 物品栏 API
+// ============================================================
+function addItem(id, count) {
+  const existing = state.inventory.find(x => x.id === id);
+  if (existing) existing.count += (count || 1);
+  else state.inventory.push({ id, count: count || 1 });
+  renderInventory();
+}
+function renderInventory() {
+  const inv = $('ui-inventory');
+  inv.innerHTML = '';
+  for (let i = 0; i < 6; i++) {
+    const slot = document.createElement('div');
+    slot.className = 'inv-slot';
+    const it = state.inventory[i];
+    if (it) {
+      const item = document.createElement('div');
+      item.className = 'inv-item';
+      item.style.backgroundImage = "url('images/item-" + it.id + ".png')";
+      item.setAttribute('data-item-id', it.id);
+      slot.appendChild(item);
+      if (it.count > 1) {
+        const c = document.createElement('span');
+        c.className = 'inv-count';
+        c.textContent = it.count;
+        slot.appendChild(c);
+      }
+    }
+    inv.appendChild(slot);
+  }
+}
+
+// ============================================================
+// ⑥.3 背包 API
+// ============================================================
+// ---- 返回 Level0（获得通关道具后，左上角出现返回按钮） ----
+const RETURN_LEVEL_NUM = 6;
+const RETURN_ITEM_ID = 'beat-badge';
+
+function updateReturnBtn() {
+  const btn = document.getElementById('return-btn');
+  if (!btn) return;
+  let has = false;
+  try { const s = JSON.parse(localStorage.getItem('linkgame_backpack') || '[]'); has = s.indexOf(RETURN_ITEM_ID) !== -1; } catch (e) {}
+  btn.style.display = has ? 'flex' : 'none';
+}
+
+function returnToLevel0() {
+  try { localStorage.setItem('linkgame_pendingReturn', String(RETURN_LEVEL_NUM)); } catch (e) {}
+  window.location.href = '../Demo_Level0/index.html';
+}
+
+window.addEventListener('DOMContentLoaded', updateReturnBtn);
+
+function addBackpackItem(id) {
+  if (state.backpack.length >= 9) return;
+  if (state.backpack.includes(id)) return;
+  state.backpack.push(id);
+  // 跨关卡同步：把本关道具合并进共享背包键（Demo_Level0 通关检测用）
+  try {
+    const shared = JSON.parse(localStorage.getItem('linkgame_backpack') || '[]');
+    state.backpack.forEach(pid => { if (shared.indexOf(pid) === -1) shared.push(pid); });
+    localStorage.setItem('linkgame_backpack', JSON.stringify(shared));
+  } catch (e) {}
+  updateReturnBtn();
+  renderBackpack();
+  // 获得本关通关物品 → 对话框提示返回地铁站
+  if (id === RETURN_ITEM_ID) showDialog('点击左上角返回地铁站吧！');
+}
+function renderBackpack() {
+  const grid = $('backpack-grid');
+  grid.innerHTML = '';
+  for (let i = 0; i < 9; i++) {
+    const slot = document.createElement('div');
+    slot.className = 'bp-slot';
+    const id = state.backpack[i];
+    if (id) {
+      const item = document.createElement('div');
+      item.className = 'bp-item';
+      item.style.backgroundImage = "url('images/item-" + id + ".png')";
+      slot.appendChild(item);
+    }
+    grid.appendChild(slot);
+  }
+}
+function toggleBackpack() {
+  $('backpack-overlay').classList.toggle('show');
+  if ($('backpack-overlay').classList.contains('show')) {
+    $('settings-overlay').classList.remove('show');
+  }
+  playSound('click');
+}
+
+// ============================================================
+// ⑥.4 对话框 API
+// ============================================================
+let dialogTimer = null;
+let dialogueVisible = false;                     // 对话气泡显示中标志：显示期间点 NPC 静默
+let dialogMode = 'auto';   // 'auto' 点击对话框消失 | 'wait' 等点击推进（ms=0，由挂载监听器处理）
+function showDialog(text, ms) {
+  const d = $('dialog-box');
+  d.textContent = text;
+  d.classList.add('visible');
+  dialogueVisible = true;
+  dialogMode = (ms === 0) ? 'wait' : 'auto';
+  clearTimeout(dialogTimer);
+  // 统一：对话框不自动消失；显示期间锁定游戏界面，仅点击对话框本身才可消失/推进
+  $('dialog-lock').classList.add('show');
+}
+function hideDialog() {
+  dialogueVisible = false;
+  clearTimeout(dialogTimer);
+  $('dialog-box').classList.remove('visible');
+  document.querySelectorAll('.speech-bubble.show').forEach(el => el.classList.remove('show'));
+  $('dialog-lock').classList.remove('show');
+}
+
+// ============================================================
+// ⑥.5 房间导航 API
+// ============================================================
+function changeRoom(dir) {
+  const next = state.currentRoomIndex + dir;
+  if (next < 0 || next >= rooms.length) return;
+  stopTrack();
+  hideDialog();
+  $('room-' + rooms[state.currentRoomIndex]).classList.remove('active-room');
+  state.currentRoomIndex = next;
+  $('room-' + rooms[next]).classList.add('active-room');
+  playSound('nav');
+  updateNavVisibility();
+}
+function updateNavVisibility() {
+  const idx = state.currentRoomIndex;
+  $('nav-left').classList.toggle('visible', idx > 0);                 // 首房间无左切箭头
+  $('nav-right').classList.toggle('visible', idx < rooms.length - 1); // 末房间无右切箭头
+}
+
+// ============================================================
+// ⑥.6 音效 API
+// ============================================================
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+function playSound(type) {
+  const el = document.getElementById('sfx-' + type);
+  if (el) {
+    el.volume = sfxVolume;
+    el.currentTime = 0;
+    const p = el.play();
+    if (p && p.catch) p.catch(() => {});
+    return;
+  }
+  try {
+    const ctx = getAudioCtx();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = 'sine'; o.frequency.value = 880;
+    g.gain.setValueAtTime(0.08, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.12);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + 0.13);
+  } catch (e) {}
+}
+
+// ============================================================
+// ⑥.7 设置 API
+// ============================================================
+function toggleSettings() {
+  $('settings-overlay').classList.toggle('show');
+  if ($('settings-overlay').classList.contains('show')) {
+    $('backpack-overlay').classList.remove('show');
+  }
+  playSound('click');
+}
+function onMusicVolume(value) {
+  musicVolume = parseInt(value) / 100;
+  $('vol-music-label').textContent = value;
+  localStorage.setItem(VOLUME_PREFIX + 'music_vol', value);
+}
+function onSfxVolume(value) {
+  sfxVolume = parseInt(value) / 100;
+  $('vol-sfx-label').textContent = value;
+  localStorage.setItem(VOLUME_PREFIX + 'sfx_vol', value);
+}
+function openExternalLink() {
+  playSound('click');
+  window.open('https://link-project.super.site/', '_blank');
+}
+function loadSettings() {
+  const mv = localStorage.getItem(VOLUME_PREFIX + 'music_vol');
+  const sv = localStorage.getItem(VOLUME_PREFIX + 'sfx_vol');
+  if (mv !== null) {
+    musicVolume = parseInt(mv) / 100;
+    $('vol-music').value = mv;
+    $('vol-music-label').textContent = mv;
+  }
+  if (sv !== null) {
+    sfxVolume = parseInt(sv) / 100;
+    $('vol-sfx').value = sv;
+    $('vol-sfx-label').textContent = sv;
+  }
+}
+
+// ============================================================
+// ⑥.8 道具拾取弹窗 API（严格模态）
+// ============================================================
+let pendingPickupItem = null;
+function showPickupModal(itemId, itemName) {
+  pendingPickupItem = itemId;
+  $('pickup-item-img').style.backgroundImage = "url('images/item-" + itemId + ".png')";
+  $('pickup-item-name').textContent = itemName;
+  $('pickup-overlay').classList.add('visible');
+}
+function confirmPickup() {
+  if (pendingPickupItem) {
+    addItem(pendingPickupItem, 1);
+    addBackpackItem(pendingPickupItem);
+    pendingPickupItem = null;
+  }
+  $('pickup-overlay').classList.remove('visible');
+  // 点击确认 → 副本通关（去掉通关提示文字）
+  state.done = true;
+  playSound('win');
+}
+
+// ============================================================
+// 音频播放核心（参考音频 / 气泡音频）
+// ============================================================
+let currentTrackId = null;
+function playTrack(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  stopTrack();
+  currentTrackId = id;
+  el.volume = musicVolume;
+  el.currentTime = 0;
+  el.onended = function () {
+    document.querySelectorAll('.bubble.playing').forEach(x => x.classList.remove('playing'));
+    if (currentTrackId === id) currentTrackId = null;
+  };
+  const p = el.play();
+  if (p && p.catch) p.catch(() => {});
+}
+function stopTrack() {
+  document.querySelectorAll('.bubble.playing').forEach(x => x.classList.remove('playing'));
+  if (currentTrackId) {
+    const el = document.getElementById(currentTrackId);
+    if (el) { el.pause(); el.currentTime = 0; }
+    currentTrackId = null;
+  }
+}
+function playBubbleAudio(roomKey, bubbleId) {
+  const cfg = ROOMS[roomKey];
+  const b = cfg.bubbles.find(x => x.id === bubbleId);
+  if (!b) return;
+  state.heard[bubbleId] = true;
+  playTrack(b.audio);
+  const el = $('bubble-' + bubbleId);
+  if (el) el.classList.add('playing');
+}
+
+// ============================================================
+// NPC 交互
+// ============================================================
+// 对话期间锁定音乐气泡（不可点击/拖动），对话完毕后再解锁
+function setBubblesLocked(locked) {
+  document.querySelectorAll('.bubble').forEach(el => {
+    el.style.pointerEvents = locked ? 'none' : 'auto';
+  });
+}
+// 是否「还没听过本房间 NPC 的参考音乐」：是则气泡只能弹提示，不播放、不可拖拽。
+// 对话期间的物理屏蔽仍由上面的 pointer-events 负责，两层互不重叠。
+function bubbleGateBlocked(el) {
+  const roomEl = el.closest('.room');
+  const roomKey = roomEl ? roomEl.id.replace('room-', '') : '';
+  return !state.refHeard[roomKey];
+}
+
+function onNpcClick(roomKey) {
+  const cfg = ROOMS[roomKey];
+  // 对话气泡未消失前，点 NPC 任意部位都静默，不播放任何音频
+  if (dialogueVisible) return;
+  if (!state.npcClicks[roomKey]) state.npcClicks[roomKey] = 0;
+  if (state.npcClicks[roomKey] === 0) {
+    state.npcClicks[roomKey]++;
+    playSound('dialogue');
+    setBubblesLocked(true);                        // 对话期间锁定音乐气泡
+    showDialog(cfg.npc.dialog, 0);        // 第一句：保持显示等点击
+    const d = $('dialog-box');
+    const advance = () => {
+      d.removeEventListener('click', advance);
+      showDialog('点击我听听看！找到相同的音乐就拖拽给我。', 3200);  // 第二句：点击对话框消失
+      // 第二句期间再次点击 → 立刻关闭对话，并解除对话锁
+      // （气泡此时未必可用：还要看是否已听过本房间的参考音乐，见 bubbleGateBlocked）
+      const close = () => {
+        d.removeEventListener('click', close);
+        hideDialog();
+        setBubblesLocked(false);
+      };
+      d.addEventListener('click', close);
+      setTimeout(() => setBubblesLocked(false), 3250);  // 兜底：第二句消失后解除对话锁
+    };
+    d.addEventListener('click', advance);
+  } else {
+    state.refHeard[roomKey] = true;      // 听过参考音乐 → 本房间气泡解锁
+    playTrack(cfg.npc.ref);
+  }
+}
+
+// ============================================================
+// 气泡布局 + 交互绑定
+// ============================================================
+function layoutRoom(roomKey) {
+  const roomEl = $('room-' + roomKey);
+  const cfg = ROOMS[roomKey];
+  const n = cfg.bubbles.length;
+  const BW = 150, BH = 120;                     // 所有房间气泡统一 150×120
+  // 布局：避开 NPC(右缘 439)与右切箭头(左缘 1058)，气泡间可适当堆叠，但与实体范围保持距离
+  const xStart = 460, xRight = 1038;            // 气泡左缘下限 / 气泡右缘上限
+  const xEnd = xRight - BW;                     // 最右气泡的 left，使其右缘不越过 xRight
+  const perRow = 3;                             // 每行最多 3 个 150 宽气泡
+  const rows = Math.ceil(n / perRow);
+  const yStart = 150, yGap = 105;               // 行距 < 高度，上下行轻微堆叠（错位后仅边缘重叠）
+  cfg.bubbles.forEach((b, i) => {
+    const row = Math.floor(i / perRow);
+    const rowCount = Math.min(perRow, n - row * perRow);
+    const inRow = i % perRow;
+    const rowShift = (row % 2) * 36;            // 奇偶行水平错位，形成锯齿状自然排布
+    const x = rowCount === 1
+      ? (xStart + xEnd) / 2 + rowShift
+      : xStart + rowShift + (xEnd - xStart - rowShift) * inRow / (rowCount - 1);
+    const y = yStart + row * yGap;              // 按行上下错落
+    const dx = ((i * 37) % 25) - 12;            // 确定性微扰，避免整齐呆板
+    const dy = ((i * 53) % 21) - 10;
+    const el = document.createElement('div');
+    el.className = 'entity bubble clickable';
+    el.id = 'bubble-' + b.id;
+    el.dataset.bubble = b.id;
+    el.style.width = BW + 'px';
+    el.style.height = BH + 'px';
+    // 微扰后仍钳制在安全区内：左缘 ≥ 460，右缘 ≤ 1038，纵向不探入对话框区域
+    const fx = Math.max(xStart, Math.min(xEnd, x + dx));
+    const fy = Math.max(130, Math.min(470, y + dy));
+    el.style.left = fx + 'px';
+    el.style.top = fy + 'px';
+    // 每个房间的音乐气泡共用同一张贴图（四个房间各不相同）
+    const roomBubbleImg = { A: 'bubble-a1', B: 'bubble-b1', C: 'bubble-c1', D: 'bubble-d1' }[roomKey];
+    el.style.backgroundImage = "url('images/" + roomBubbleImg + ".png')";
+    roomEl.appendChild(el);
+    bindBubble(el, roomKey, b);
+  });
+}
+function bindBubble(el, roomKey, bubble) {
+  el.addEventListener('mousedown', startBubbleDrag);
+  el.addEventListener('touchstart', bubbleTouchStart, { passive: false });
+  el.addEventListener('touchmove', bubbleTouchMove, { passive: false });
+  el.addEventListener('touchend', bubbleTouchEnd);
+}
+
+// ============================================================
+// 5. 手动拖拽引擎（气泡 → NPC，改编自模板）
+// ============================================================
+let dragCursorFollower = null;
+let dragState = null;
+
+function ensureCursorFollower() {
+  if (!dragCursorFollower) {
+    dragCursorFollower = document.createElement('div');
+    dragCursorFollower.id = 'drag-cursor-follower';
+    dragCursorFollower.style.backgroundImage = "url('images/cursor-grabbing.png')";
+    document.body.appendChild(dragCursorFollower);
+  }
+}
+function removeCursorFollower() { if (dragCursorFollower) { dragCursorFollower.remove(); dragCursorFollower = null; } }
+function cleanupDrag() {
+  if (dragState && dragState.clone) dragState.clone.remove();
+  dragState = null;
+  document.body.classList.remove('dragging');
+  removeCursorFollower();
+  document.querySelectorAll('.drag-over-target').forEach(el => el.classList.remove('drag-over-target'));
+}
+
+function startBubbleDrag(e) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  const el = e.currentTarget;
+  if (bubbleGateBlocked(el)) { showDialog('先听听原曲！', 1800); return; }  // 未听参考音乐 → 只提示，不拖拽
+  const clone = el.cloneNode(true);
+  clone.className = 'entity bubble';
+  clone.style.cssText = `position: fixed; pointer-events: none; z-index: 99998;
+    width: ${el.offsetWidth}px; height: ${el.offsetHeight}px;
+    background-image: ${el.style.backgroundImage};
+    background-size: contain; background-repeat: no-repeat; background-position: center;
+    opacity: 0.9; display: none; transform: translate(-50%, -50%);`;
+  document.body.appendChild(clone);
+  dragState = {
+    roomKey: el.closest('.room').id.replace('room-', ''),
+    bubbleId: el.dataset.bubble,
+    sourceEl: el,
+    startX: e.clientX, startY: e.clientY,
+    started: false,
+    clone
+  };
+}
+
+document.addEventListener('mousemove', function (e) {
+  if (!dragState) return;
+  const dx = e.clientX - dragState.startX, dy = e.clientY - dragState.startY;
+  if (!dragState.started) {
+    if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+    dragState.started = true;
+    document.body.classList.add('dragging');
+    ensureCursorFollower();
+    dragState.clone.style.display = 'block';
+  }
+  dragState.clone.style.left = e.clientX + 'px';
+  dragState.clone.style.top = e.clientY + 'px';
+  if (dragCursorFollower) { dragCursorFollower.style.left = e.clientX + 'px'; dragCursorFollower.style.top = e.clientY + 'px'; }
+  const elUnder = document.elementFromPoint(e.clientX, e.clientY);
+  const dropTarget = elUnder && elUnder.closest && elUnder.closest('[data-drop-target]');
+  document.querySelectorAll('.drag-over-target').forEach(el => { if (el !== dropTarget) el.classList.remove('drag-over-target'); });
+  if (dropTarget && !dropTarget.classList.contains('drag-over-target')) dropTarget.classList.add('drag-over-target');
+});
+
+document.addEventListener('mouseup', function (e) {
+  if (!dragState) return;
+  if (dragState.started) {
+    const elUnder = document.elementFromPoint(e.clientX, e.clientY);
+    const dropTarget = elUnder && elUnder.closest && elUnder.closest('[data-drop-target]');
+    if (dropTarget) handleBubbleDrop(dragState.roomKey, dragState.bubbleId);
+  } else {
+    // 未拖动 → 视为点击 → 播放气泡音频
+    playBubbleAudio(dragState.roomKey, dragState.bubbleId);
+  }
+  cleanupDrag();
+});
+
+$('game-container').addEventListener('mouseleave', () => { if (dragState) cleanupDrag(); });
+
+// ============================================================
+// 5.3 移动端触摸拖拽（气泡 → NPC）
+// ============================================================
+let touchBubble = null;
+let touchGhostEl = null;
+
+function bubbleTouchStart(ev) {
+  if (ev.touches.length !== 1) return;
+  const el = ev.currentTarget;
+  if (bubbleGateBlocked(el)) { ev.preventDefault(); showDialog('先听听原曲！', 1800); return; }  // 未听参考音乐 → 只提示，不拖拽
+  touchBubble = {
+    roomKey: el.closest('.room').id.replace('room-', ''),
+    bubbleId: el.dataset.bubble,
+    sourceEl: el,
+    startX: ev.touches[0].clientX,
+    startY: ev.touches[0].clientY,
+    started: false
+  };
+  ev.preventDefault();
+}
+function bubbleTouchMove(ev) {
+  if (!touchBubble) return;
+  ev.preventDefault();
+  const t = ev.touches[0];
+  const dx = t.clientX - touchBubble.startX, dy = t.clientY - touchBubble.startY;
+  if (!touchBubble.started) {
+    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+    touchBubble.started = true;
+    const el = touchBubble.sourceEl;
+    touchGhostEl = el.cloneNode(true);
+    touchGhostEl.style.position = 'fixed';
+    touchGhostEl.style.pointerEvents = 'none';
+    touchGhostEl.style.zIndex = '99999';
+    touchGhostEl.style.width = el.offsetWidth + 'px';
+    touchGhostEl.style.height = el.offsetHeight + 'px';
+    touchGhostEl.style.opacity = '0.9';
+    touchGhostEl.style.transform = 'translate(-50%,-50%)';
+    document.body.appendChild(touchGhostEl);
+    document.body.classList.add('dragging');
+    ensureCursorFollower();
+  }
+  if (touchGhostEl) { touchGhostEl.style.left = t.clientX + 'px'; touchGhostEl.style.top = t.clientY + 'px'; }
+  if (dragCursorFollower) { dragCursorFollower.style.left = t.clientX + 'px'; dragCursorFollower.style.top = t.clientY + 'px'; }
+  const elUnder = document.elementFromPoint(t.clientX, t.clientY);
+  const dropTarget = elUnder && elUnder.closest && elUnder.closest('[data-drop-target]');
+  document.querySelectorAll('.drag-over-target').forEach(el => { if (el !== dropTarget) el.classList.remove('drag-over-target'); });
+  if (dropTarget && !dropTarget.classList.contains('drag-over-target')) dropTarget.classList.add('drag-over-target');
+}
+function bubbleTouchEnd(ev) {
+  if (!touchBubble) return;
+  const t = ev.changedTouches[0];
+  if (touchBubble.started) {
+    const elUnder = document.elementFromPoint(t.clientX, t.clientY);
+    const dropTarget = elUnder && elUnder.closest && elUnder.closest('[data-drop-target]');
+    if (dropTarget) handleBubbleDrop(touchBubble.roomKey, touchBubble.bubbleId);
+  } else {
+    // 轻点 → 视为点击 → 播放气泡音频
+    playBubbleAudio(touchBubble.roomKey, touchBubble.bubbleId);
+  }
+  document.body.classList.remove('dragging');
+  removeCursorFollower();
+  if (touchGhostEl && touchGhostEl.parentNode) touchGhostEl.parentNode.removeChild(touchGhostEl);
+  touchGhostEl = null;
+  touchBubble = null;
+  document.querySelectorAll('.drag-over-target').forEach(el => el.classList.remove('drag-over-target'));
+}
+
+// ============================================================
+// 选择判定
+// ============================================================
+function handleBubbleDrop(roomKey, bubbleId) {
+  const cfg = ROOMS[roomKey];
+  if (state.solved[roomKey]) return;               // 已通关，忽略
+  if (!state.heard[bubbleId]) {                     // 未播放过 → 提示先听
+    playSound('wrong');
+    showDialog(cfg.npc.unplayed, 2500);
+    return;
+  }
+  if (bubbleId === cfg.correct) {                   // 正确
+    state.solved[roomKey] = true;
+    stopTrack();
+    playSound('collect');
+    hideRoomBubbles(roomKey);
+    updateNavVisibility();
+    if (cfg.next) {
+      showDialog('♪ 就是这个！快去下一家铺子看看吧！', 1800);
+    } else {
+      // roomD 通关：先弹出对话，只能由玩家点击消失，消失后才弹出通关道具窗口
+      showDialog('整条街道都安静了！谢谢你！拿着这个吧！', 0);
+      const d = $('dialog-box');
+      const onWinClick = () => {
+        d.removeEventListener('click', onWinClick);
+        hideDialog();
+        grantWinItem();
+      };
+      d.addEventListener('click', onWinClick);
+    }
+  } else {                                          // 错误
+    playSound('wrong');
+    showDialog(cfg.npc.wrong, 2500);
+  }
+}
+function hideRoomBubbles(roomKey) {
+  const cfg = ROOMS[roomKey];
+  cfg.bubbles.forEach(b => {
+    const el = $('bubble-' + b.id);
+    if (el) {
+      el.classList.add('solved');
+      el.style.pointerEvents = 'none';
+      setTimeout(() => { el.remove(); }, 400);
+    }
+  });
+}
+function grantWinItem() {
+  if (state.hasBeatBadge) return;
+  state.hasBeatBadge = true;
+  setTimeout(() => {
+    playSound('collect');
+    showPickupModal('beat-badge', '智能耳机');
+  }, 500);
+}
+
+// ============================================================
+// ⑥.9 初始化
+// ============================================================
+function initGame() {
+  loadSettings();
+  rooms.forEach(r => layoutRoom(r));
+  updateNavVisibility();
+  renderInventory();
+  // 统一：对话框不自动消失，点击对话框范围区域后才消失；显示期间锁定游戏界面。
+  // 等点击型（wait）由动态挂载的 advance/close/onWinClick 监听器推进，这里只处理自动型（auto）。
+  $('dialog-box').addEventListener('click', function () {
+    if (dialogMode !== 'auto') return;
+    hideDialog();
+  });
+
+  // 横屏提示绑定
+  $('landscape-hint').addEventListener('click', function (e) { if (e.target === e.currentTarget) dismissLandscapeHint(); });
+  $('landscape-hint-close').addEventListener('click', dismissLandscapeHint);
+
+  console.log('🎮 噪起来堕落街 — 听声寻乐 Demo_Level6');
+}
+window.addEventListener('DOMContentLoaded', initGame);
+</script>
+</body>
+</html>
