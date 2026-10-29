@@ -1,0 +1,1750 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>奠基大道中</title>
+<style>
+/* ================================================================
+   BASE STYLES (GAME-TEMPLATE.md §3)
+   ================================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #0a0a0a; overflow: hidden;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  width: 100vw; height: 100vh;
+  user-select: none; -webkit-user-select: none;
+}
+#game-container {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%); transform-origin: center center;
+  width: 1280px; height: 720px;
+  background: #222; overflow: hidden;
+  box-shadow: 0 0 20px rgba(0,0,0,0.8);
+  display: flex; flex-direction: row;
+  cursor: url('images/cursor-default.png') 2 2, auto;
+}
+
+/* Area Layout */
+#room-area { width: 1120px; height: 720px; position: relative; overflow: hidden; background: #444; }
+#ui-inventory {
+  width: 160px; height: 720px;
+  background-image: url('images/ui-inventory-bg.png'); background-size: cover;
+  border-left: 2px solid #000;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 15px 0; gap: 15px;
+  overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none;
+}
+#ui-inventory::-webkit-scrollbar { display: none; }
+
+/* Rooms */
+.room { display: none; position: absolute; top: 0; left: 0;
+  width: 1120px; height: 720px;
+  background-size: cover; background-position: center; background-repeat: no-repeat; }
+.room.active-room { display: block; }
+#room-A { background-image: url('images/room-A-bg.png'); }
+#room-B { background-image: url('images/room-B-bg.png'); }
+#room-C { background-image: url('images/room-C-bg.png'); }
+#room-D { background-image: url('images/room-D-bg.png'); }
+
+/* Lane markers (scene furniture: vertical road dividers) */
+.lane-marker {
+  position: absolute; top: 0; bottom: 0; width: 3px; z-index: 5; display: none;
+  background: repeating-linear-gradient(to bottom, rgba(255,255,255,0.55) 0px, rgba(255,255,255,0.55) 20px, transparent 20px, transparent 40px);
+}
+/* roomB 双车道 1 条；roomC 三车道 2 条；roomD 五车道 4 条 */
+#lane-marker-b  { left: 559px; }
+#lane-marker-c1 { left: 413px; }
+#lane-marker-c2 { left: 706px; }
+#lane-marker-d1 { left: 224px; }
+#lane-marker-d2 { left: 448px; }
+#lane-marker-d3 { left: 672px; }
+#lane-marker-d4 { left: 896px; }
+
+/* Entities */
+.entity {
+  position: absolute;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+}
+.clickable { transition: filter 0.2s; }
+.clickable:hover { filter: brightness(1.2); }
+
+/* NPC1 (city hero) — right 1/3，高度缩小 40%（720→432），底部与画面底部相切 */
+#entity-npc1 {
+  left: 760px; top: 288px; width: 360px; height: 432px; z-index: 50;
+  background-image: url('images/npc-1.png');
+}
+body.dragging #entity-npc1[data-drop-target] { filter: brightness(1.25); }
+
+/* Player (1:1 square, left/right views) */
+#entity-player { left: 0; top: 0; width: 62.4px; height: 62.4px; z-index: 80; display: none; will-change: transform; }
+
+/* Red flag pick-up item in room C */
+#entity-flag {
+  width: 56px; height: 56px; left: 1056px; top: 332px; z-index: 70; display: none;
+  background-image: url('images/item-redflag.png');
+}
+
+/* Vehicles (NPC2/3/4 moving obstacles) */
+#vehicles { position: absolute; top: 0; left: 0; width: 1120px; height: 720px; pointer-events: none; z-index: 60; }
+.vehicle { left: 0; top: 0; z-index: 60; will-change: transform; }
+
+/* Dialog Box */
+#dialog-box {
+  position: absolute; bottom: 40px; left: 160px;
+  width: 800px; min-height: 70px;
+  background: rgba(255,255,255,0.95); border: 3px solid #333; border-radius: 15px;
+  color: #000; font-size: 20px; line-height: 1.7;
+  padding: 20px; z-index: 10001; display: none;
+  text-align: center; box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+}
+#dialog-box.visible { display: block; animation: dialogIn 0.35s ease-out; }
+@keyframes dialogIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+/* 对话框模态锁：对话框显示期间锁定整个游戏界面，仅对话框本身可点击 */
+#dialog-lock {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  z-index: 10000; display: none;
+}
+#dialog-lock.show { display: block; }
+
+/* Speech Bubble */
+.speech-bubble {
+  position: absolute;
+  background: rgba(30, 20, 40, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  color: #ccc;
+  font-size: 20px;
+  padding: 8px 20px;
+  z-index: 190;
+  display: none;
+  white-space: nowrap;
+}
+.speech-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -8px; left: 50%;
+  transform: translateX(-50%);
+  width: 0; height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 8px solid rgba(30, 20, 40, 0.9);
+}
+.speech-bubble.show { display: block; animation: bubbleIn 0.2s ease-out; }
+@keyframes bubbleIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Nav Buttons */
+.nav-btn {
+  position: absolute; top: 335px;
+  width: 50px; height: 60px;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  z-index: 150; opacity: 0.7; transition: opacity 0.3s; display: none;
+}
+.nav-btn:hover { filter: brightness(1.2); }
+.nav-btn.visible { display: block; }
+#nav-left  { left: 12px;  background-image: url('images/nav-left.png'); }
+#nav-right { right: 12px; background-image: url('images/nav-right.png'); }
+
+/* Virtual Joystick (mobile) */
+#joystick {
+  position: absolute; left: 36px; bottom: 36px;
+  width: 150px; height: 150px; border-radius: 50%;
+  background: rgba(255,255,255,0.10);
+  border: 3px solid rgba(255,255,255,0.35);
+  z-index: 180; display: none; touch-action: none;
+  will-change: transform;
+}
+#joystick-knob {
+  position: absolute; left: 50%; top: 50%;
+  width: 64px; height: 64px; margin-left: -32px; margin-top: -32px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.45);
+  will-change: transform;
+}
+
+/* Inventory Slots */
+.inv-slot { width: 120px; height: 120px; background: rgba(0,0,0,0.3);
+  border-radius: 5px; flex-shrink: 0; position: relative;
+  display: flex; align-items: center; justify-content: center; }
+.inv-slot:empty { border-style: dashed; }
+.inv-item {
+  width: 100%; height: 100%;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  border-radius: 3px;
+  cursor: url('images/cursor-grab.png') 16 16, grab;
+}
+.inv-count {
+  position: absolute; bottom: 5px; right: 8px;
+  background: rgba(0,0,0,0.7); color: #ffd700;
+  font-size: 14px; font-weight: bold;
+  padding: 1px 6px; border-radius: 8px; pointer-events: none;
+}
+
+/* Settings Button — MUST use right: 172px */
+#settings-btn {
+  position: absolute;
+  top: 12px; right: 172px;
+  width: 42px; height: 42px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+#settings-btn:hover {
+  background: rgba(0, 0, 0, 0.75);
+  border-color: rgba(255, 255, 255, 0.6);
+  transform: rotate(30deg);
+}
+#settings-btn svg { width: 24px; height: 24px; fill: rgba(255, 255, 255, 0.85); }
+
+/* Backpack Button — MUST use left: 1016px */
+#backpack-btn {
+  position: absolute;
+  top: 12px; left: 1016px;
+  width: 42px; height: 42px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+#backpack-btn:hover {
+  background: rgba(0, 0, 0, 0.75);
+  border-color: rgba(255, 255, 255, 0.6);
+}
+#backpack-btn svg { width: 24px; height: 24px; fill: rgba(255, 255, 255, 0.85); }
+
+/* Settings Overlay */
+#settings-overlay {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  z-index: 400; display: none;
+  align-items: center; justify-content: center;
+}
+#settings-overlay.show { display: flex; }
+#settings-panel {
+  position: relative; width: 400px;
+  background: rgba(20, 20, 30, 0.92);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  padding: 32px 36px 28px;
+  color: #e0e0e0;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  pointer-events: auto; box-sizing: border-box;
+}
+#settings-panel h3 {
+  text-align: center; margin-bottom: 24px;
+  font-size: 22px; font-weight: 500; letter-spacing: 2px; color: #fff;
+}
+#settings-close-btn {
+  position: absolute; top: 10px; right: 16px;
+  width: 32px; height: 32px;
+  background: none; border: none;
+  color: #999; font-size: 24px;
+  transition: color 0.2s;
+  line-height: 32px; text-align: center; padding: 0;
+}
+#settings-close-btn:hover { color: #fff; }
+.setting-row { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.vol-icon { width: 22px; height: 22px; opacity: 0.7; flex-shrink: 0; }
+.vol-label { width: 56px; text-align: right; font-size: 15px; color: #bbb; flex-shrink: 0; }
+.setting-row input[type="range"] {
+  flex: 1; height: 6px;
+  -webkit-appearance: none; appearance: none;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 3px; outline: none;
+}
+.setting-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #fff; border: 2px solid #888;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s ease;
+}
+.setting-row input[type="range"]::-webkit-slider-thumb:hover { filter: brightness(1.2); }
+.setting-row input[type="range"]::-moz-range-thumb {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #fff; border: 2px solid #888;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+.setting-row input[type="range"]::-moz-range-thumb:hover { filter: brightness(1.2); }
+.vol-value { width: 36px; text-align: center; font-size: 14px; color: #aaa; flex-shrink: 0; }
+#settings-link-btn {
+  width: 100%; margin-top: 24px; padding: 12px 0;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 10px; color: #ddd;
+  font-size: 16px; letter-spacing: 1px;
+  text-align: center; transition: all 0.2s ease;
+}
+#settings-link-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.45);
+  color: #fff;
+}
+
+/* Backpack Overlay */
+#backpack-overlay {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  z-index: 400; display: none;
+  align-items: center; justify-content: center;
+}
+#backpack-overlay.show { display: flex; }
+#backpack-panel {
+  position: relative; width: 340px;
+  background: rgba(20, 20, 30, 0.92);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  padding: 32px 28px 28px;
+  color: #e0e0e0;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  pointer-events: auto; box-sizing: border-box;
+}
+#backpack-panel h3 {
+  text-align: center; margin-bottom: 20px;
+  font-size: 22px; font-weight: 500; letter-spacing: 2px; color: #fff;
+}
+#backpack-close-btn {
+  position: absolute; top: 10px; right: 16px;
+  width: 32px; height: 32px;
+  background: none; border: none;
+  color: #999; font-size: 24px;
+  transition: color 0.2s;
+  line-height: 32px; text-align: center; padding: 0;
+}
+#backpack-close-btn:hover { color: #fff; }
+#backpack-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 84px);
+  grid-template-rows: repeat(3, 84px);
+  gap: 10px;
+  justify-content: center;
+}
+.bp-slot {
+  width: 84px; height: 84px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 2px dashed #444;
+  border-radius: 6px;
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+}
+.bp-item {
+  width: 100%; height: 100%;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  cursor: url('images/cursor-grab.png') 16 16, grab;
+}
+
+/* Pickup Modal */
+#pickup-overlay {
+  position: absolute; top: 0; left: 0;
+  width: 1120px; height: 720px;
+  background: rgba(0,0,0,0.7); z-index: 350; display: none;
+  align-items: center; justify-content: center;
+}
+#pickup-overlay.visible { display: flex; }
+#pickup-panel {
+  background: #1a1a2e; border: 2px solid #555; border-radius: 16px;
+  padding: 30px 40px; width: 300px; color: #fff;
+  text-align: center;
+}
+#pickup-panel h3 { margin-bottom: 20px; font-size: 20px; letter-spacing: 2px; }
+#pickup-item-img {
+  width: 100px; height: 100px;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  margin: 0 auto 12px;
+}
+#pickup-item-name { font-size: 16px; color: #ccc; margin-bottom: 24px; }
+#pickup-confirm-btn {
+  padding: 10px 40px;
+  border: none; border-radius: 8px;
+  background: #4a9eff; color: #fff; font-size: 15px; cursor: url('images/cursor-default.png') 2 2, auto; letter-spacing: 2px;
+}
+#pickup-confirm-btn:hover { filter: brightness(1.2); }
+
+/* Drag System */
+/* 统一：原生控件（<button>、滑块等）不继承自定义指针，这里显式指定 */
+button, input[type="range"] { cursor: url('images/cursor-default.png') 2 2, auto; }
+html.dragging, body.dragging, body.dragging * { cursor: none !important; }
+#drag-cursor-follower {
+  position: fixed; pointer-events: none; z-index: 99999;
+  width: 32px; height: 32px;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  transform: translate(-16px, -16px);
+}
+body.dragging .drag-over-target { filter: brightness(1.3) drop-shadow(0 0 6px cyan); }
+
+/* === 横屏提示遮罩 === */
+#landscape-hint {
+  position: fixed; inset: 0;
+  background: #0a0a0a;
+  z-index: 100000;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  color: #fff;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  text-align: center;
+  user-select: none; -webkit-user-select: none;
+}
+#landscape-hint.show { display: flex; }
+#landscape-hint-icon {
+  width: 76px; height: 76px;
+  animation: hintLockPulse 1.8s ease-in-out infinite;
+}
+@keyframes hintLockPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+#landscape-hint p { font-size: 18px; letter-spacing: 2px; opacity: 0.85; }
+#landscape-hint .hint-sub { font-size: 13px; opacity: 0.5; letter-spacing: 1px; }
+#landscape-hint-close {
+  margin-top: 8px;
+  padding: 10px 40px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 24px;
+  color: #ddd;
+  font-size: 15px;
+  letter-spacing: 2px;
+  cursor: url('images/cursor-default.png') 2 2, auto;
+  transition: background 0.2s, color 0.2s;
+}
+#landscape-hint-close:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+#return-btn {
+  position: absolute;
+  top: 12px; left: 12px;
+  width: 42px; height: 42px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  z-index: 300;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+#return-btn:hover { background: rgba(0, 0, 0, 0.75); border-color: rgba(255, 255, 255, 0.6); }
+#return-btn svg { width: 24px; height: 24px; fill: rgba(255, 255, 255, 0.85); }
+</style>
+</head>
+<body>
+
+<!-- Audio -->
+<audio id="bgm" src="audio/bgm.wav" loop preload="none"></audio>
+<audio id="sfx-click"   src="audio/sfx-click.wav"   preload="auto"></audio>
+<audio id="sfx-nav"     src="audio/sfx-nav.wav"     preload="auto"></audio>
+<audio id="sfx-dialog"  src="audio/sfx-dialog.wav"  preload="auto"></audio>
+<audio id="sfx-collect" src="audio/sfx-collect.wav" preload="auto"></audio>
+<audio id="sfx-pickup"  src="audio/sfx-pickup.wav"  preload="auto"></audio>
+<audio id="sfx-drop"    src="audio/sfx-drop.wav"    preload="auto"></audio>
+<audio id="sfx-fail"    src="audio/sfx-fail.wav"    preload="auto"></audio>
+<audio id="sfx-success" src="audio/sfx-success.wav" preload="auto"></audio>
+
+<!-- Game Container -->
+<div id="game-container">
+
+  <!-- Room Area -->
+  <div id="room-area">
+
+    <!-- Room A : 城市路口，NPC1 城市英雄在右侧 -->
+    <div id="room-A" class="room active-room">
+      <div id="entity-npc1" class="entity clickable"></div>
+    </div>
+
+    <!-- Room B : 双向双车道马路（仅 NPC2） -->
+    <div id="room-B" class="room"></div>
+
+    <!-- Room C : 双向双车道马路（NPC2/3，参照 roomB 设计） -->
+    <div id="room-C" class="room"></div>
+
+    <!-- Room D : 五车道马路（NPC2/3/4，红旗在此） -->
+    <div id="room-D" class="room"></div>
+
+    <!-- Lane markers -->
+    <div id="lane-marker-b"  class="lane-marker"></div>
+    <div id="lane-marker-c1" class="lane-marker"></div>
+    <div id="lane-marker-c2" class="lane-marker"></div>
+    <div id="lane-marker-d1" class="lane-marker"></div>
+    <div id="lane-marker-d2" class="lane-marker"></div>
+    <div id="lane-marker-d3" class="lane-marker"></div>
+    <div id="lane-marker-d4" class="lane-marker"></div>
+
+    <!-- Player (persists across rooms) -->
+    <div id="entity-player" class="entity"></div>
+
+    <!-- Red flag pick-up item (room D) -->
+    <div id="entity-flag" class="entity"></div>
+
+    <!-- Vehicles container (NPC2/3/4) -->
+    <div id="vehicles"></div>
+
+    <!-- Speech bubbles -->
+    <div id="bubble-npc-1" class="speech-bubble" style="left:900px; top:50px;"></div>
+    <div id="bubble-flag"  class="speech-bubble" style="left:900px; top:270px;"></div>
+
+    <!-- Dialog Box -->
+    <div id="dialog-box"></div>
+
+    <!-- Nav Buttons (仅 roomA 向右切换，由 JS 控制显隐) -->
+    <div id="nav-left" class="nav-btn" onclick="changeRoom(-1)"></div>
+    <div id="nav-right" class="nav-btn" onclick="changeRoom(1)"></div>
+
+    <!-- Virtual Joystick (mobile) -->
+    <div id="joystick">
+      <div id="joystick-knob"></div>
+    </div>
+
+  </div>
+
+  <!-- Inventory -->
+  <div id="ui-inventory"></div>
+
+  <!-- 对话框模态锁（对话框显示期间锁定界面，仅对话框本身可点击） -->
+  <div id="dialog-lock"></div>
+
+  <!-- Backpack Button -->
+  <div id="backpack-btn" onclick="toggleBackpack()" style="display:none">
+    <svg viewBox="0 0 24 24"><path d="M20 6h-4V4c0-1.1-.9-2-2-2h-4c-1.1 0-2 .9-2 2v2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zM10 4h4v2h-4V4zm10 16H4V8h16v12z"/><path d="M9 12h2v2H9zm4 0h2v2h-2z"/></svg>
+  </div>
+
+  <!-- Settings Button -->
+    <!-- 返回 Level0 -->
+  <div id="return-btn" onclick="returnToLevel0()">
+    <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+  </div>
+<div id="settings-btn" onclick="toggleSettings()">
+    <svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
+  </div>
+
+  <!-- Settings Overlay -->
+  <div id="settings-overlay" onclick="if(event.target===this)toggleSettings()">
+    <div id="settings-panel" onclick="event.stopPropagation()">
+      <button id="settings-close-btn" onclick="toggleSettings()">&times;</button>
+      <h3>设 置</h3>
+      <div class="setting-row">
+        <svg class="vol-icon" viewBox="0 0 24 24" fill="rgba(255,255,255,0.7)"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+        <span class="vol-label">音乐</span>
+        <input type="range" id="vol-music" min="0" max="100" value="70" oninput="onMusicVolume(this.value)">
+        <span class="vol-value" id="vol-music-label">70</span>
+      </div>
+      <div class="setting-row">
+        <svg class="vol-icon" viewBox="0 0 24 24" fill="rgba(255,255,255,0.7)"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+        <span class="vol-label">音效</span>
+        <input type="range" id="vol-sfx" min="0" max="100" value="80" oninput="onSfxVolume(this.value)">
+        <span class="vol-value" id="vol-sfx-label">80</span>
+      </div>
+      <button id="settings-link-btn" onclick="openExternalLink()">查看更多内容 →</button>
+    </div>
+  </div>
+
+  <!-- Backpack Overlay -->
+  <div id="backpack-overlay" onclick="if(event.target===this)toggleBackpack()">
+    <div id="backpack-panel" onclick="event.stopPropagation()">
+      <button id="backpack-close-btn" onclick="toggleBackpack()">&times;</button>
+      <h3>背 包</h3>
+      <div id="backpack-grid">
+        <div class="bp-slot"></div><div class="bp-slot"></div><div class="bp-slot"></div>
+        <div class="bp-slot"></div><div class="bp-slot"></div><div class="bp-slot"></div>
+        <div class="bp-slot"></div><div class="bp-slot"></div><div class="bp-slot"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pickup Modal -->
+  <div id="pickup-overlay">
+    <div id="pickup-panel">
+      <h3>已回收至背包</h3>
+      <div id="pickup-item-img"></div>
+      <div id="pickup-item-name"></div>
+      <button id="pickup-confirm-btn" onclick="confirmPickup()">确 认</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- 横屏提示：建议锁定旋屏（一次性、可关闭、6 秒自动消失） -->
+<div id="landscape-hint">
+  <svg id="landscape-hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+  </svg>
+  <p>建议锁定竖屏再把手机横过来</p>
+  <p class="hint-sub">游玩体验更佳</p>
+  <button id="landscape-hint-close">知道了</button>
+</div>
+
+<script>
+// ============================================================
+// ① 设备识别（必须放在 <script> 最顶部，先于 resizeGame()）
+// 生成 window.deviceInfo，并给 <html> 打上 device-* 类
+// ============================================================
+(function detectDevice() {
+  const ua = navigator.userAgent;
+
+  const isIOS     = /iPhone|iPad|iPod/i.test(ua);
+  const isAndroid = /Android/i.test(ua);
+  const isMac     = /Mac/i.test(ua) && !isIOS;
+  const isWindows = /Windows/i.test(ua);
+
+  const isTablet   = /iPad/i.test(ua) || (isAndroid && !/Mobile/i.test(ua));
+  const isMobileUA = /Mobi|Android|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  const isTouch    = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  const coarsePtr  = window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : false;
+  const noHover    = window.matchMedia ? window.matchMedia('(hover: none)').matches : false;
+  const isTouchPrimary = coarsePtr && noHover;
+  const isMobile   = isMobileUA || isTouchPrimary;
+
+  const isWeChat  = /MicroMessenger/i.test(ua);
+  const isQQ      = /QQ\//i.test(ua);
+  const isSafari  = /Safari/i.test(ua) && !/Chrome|CriOS|Edg|OPR/i.test(ua);
+  const isChrome  = /Chrome|CriOS/i.test(ua) && !/Edg|OPR/i.test(ua);
+  const isEdge    = /Edg/i.test(ua);
+  const isFirefox = /Firefox/i.test(ua);
+
+  const isPortrait = window.matchMedia
+    ? window.matchMedia('(orientation: portrait)').matches
+    : window.innerHeight > window.innerWidth;
+
+  window.deviceInfo = {
+    isMobile, isTablet, isMobileDevice: isMobile || isTablet, isDesktop: !isMobile && !isTablet,
+    isTouch, isIOS, isAndroid, isMac, isWindows,
+    isWeChat, isQQ, isSafari, isChrome, isEdge, isFirefox,
+    isPortrait, isLandscape: !isPortrait,
+    os: isIOS ? 'ios' : isAndroid ? 'android' : isWindows ? 'windows' : isMac ? 'mac' : 'other',
+    browser: isWeChat ? 'wechat' : isQQ ? 'qq' : isSafari ? 'safari'
+           : isEdge ? 'edge' : isFirefox ? 'firefox' : isChrome ? 'chrome' : 'other',
+    type: isMobile ? 'mobile' : isTablet ? 'tablet' : 'desktop'
+  };
+
+  const root = document.documentElement;
+  root.classList.add('device-' + deviceInfo.type);
+  root.setAttribute('data-device', deviceInfo.type);
+  if (deviceInfo.isTouch)     root.classList.add('device-touch');
+  if (deviceInfo.isIOS)       root.classList.add('device-ios');
+  if (deviceInfo.isAndroid)   root.classList.add('device-android');
+  if (deviceInfo.isWeChat)    root.classList.add('device-wechat');
+  if (deviceInfo.isPortrait)  root.classList.add('device-portrait');
+  else                        root.classList.add('device-landscape');
+
+  console.log('📱 设备识别:', deviceInfo);
+})();
+
+// ============================================================
+// ② 画布缩放 + 移动端强制横屏（必须放在设备识别之后）
+// ============================================================
+function resizeGame() {
+  const gc = document.getElementById('game-container');
+  const rotated = deviceInfo.isMobileDevice && deviceInfo.isPortrait;
+  let s;
+  if (rotated) {
+    s = Math.min(window.innerHeight / 1280, window.innerWidth / 720);
+    gc.style.transform = `translate(-50%, -50%) rotate(90deg) scale(${s})`;
+  } else {
+    s = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+    gc.style.transform = `translate(-50%, -50%) scale(${s})`;
+  }
+  gc.classList.toggle('rotated', rotated);
+  window._gameScale = s;   // 供虚拟摇杆做屏幕坐标 → 游戏坐标换算
+}
+window.addEventListener('resize', resizeGame);
+resizeGame();
+
+// ============================================================
+// ③ 方向监听 + 横屏锁屏提示（一次性、可关闭、6 秒自动消失）
+// ============================================================
+let landscapeHintDismissed = false;
+let landscapeHintTimer = null;
+
+function updateLandscapeHint() {
+  const hint = document.getElementById('landscape-hint');
+  if (!hint) return;
+  const shouldShow = deviceInfo.isMobileDevice && deviceInfo.isLandscape && !landscapeHintDismissed;
+  if (shouldShow && !hint.classList.contains('show')) {
+    hint.classList.add('show');
+    if (landscapeHintTimer) clearTimeout(landscapeHintTimer);
+    landscapeHintTimer = setTimeout(dismissLandscapeHint, 6000);
+  } else if (!shouldShow) {
+    hint.classList.remove('show');
+  }
+}
+
+function dismissLandscapeHint() {
+  landscapeHintDismissed = true;
+  if (landscapeHintTimer) { clearTimeout(landscapeHintTimer); landscapeHintTimer = null; }
+  const hint = document.getElementById('landscape-hint');
+  if (hint) hint.classList.remove('show');
+}
+
+function updateOrientation() {
+  const isPortrait = window.matchMedia
+    ? window.matchMedia('(orientation: portrait)').matches
+    : (window.innerHeight > window.innerWidth);
+
+  deviceInfo.isPortrait = isPortrait;
+  deviceInfo.isLandscape = !isPortrait;
+  const root = document.documentElement;
+  root.classList.toggle('device-portrait', isPortrait);
+  root.classList.toggle('device-landscape', !isPortrait);
+
+  resizeGame();
+  updateLandscapeHint();
+}
+window.addEventListener('resize', updateOrientation);
+window.addEventListener('orientationchange', updateOrientation);
+if (window.screen && screen.orientation && screen.orientation.addEventListener) {
+  screen.orientation.addEventListener('change', updateOrientation);
+}
+updateOrientation();
+
+// ================================================================
+// GAME: 马路英雄 (Road Hero) — Rusty Lake inspired point & click
+// ================================================================
+
+// ---- Constants ----
+const STORAGE_PREFIX = 'roadhero_';
+// 音量设置在所有关卡间共用（与 Demo_Level0 同一对键）
+const VOLUME_PREFIX = 'linkgame_';
+const rooms = ['A', 'B', 'C', 'D'];
+
+const PLAYER_SIZE = 62.4;    // 玩家实体 1:1（48 × 1.3 = 增大 30%）
+const VEHICLE_W = 66;        // NPC 车辆实体宽 66（宽:高 = 1:2，与 npc-N 车辆占位图一致）
+const VEHICLE_H = VEHICLE_W * 2;  // 高 132
+const SIDEWALK = 120;        // 左右路沿宽度（无车道区域）
+const EXIT_RIGHT_X = 1072;   // 玩家中心 x ≥ 此值 → 向右越界
+const EXIT_LEFT_X = 48;      // 玩家中心 x ≤ 此值 → 向左越界
+
+// 红旗拾取点（roomC 右侧路沿中央）
+const FLAG = { x: 1084, y: 360, half: 28 };
+
+// 车道配置：房间内 NPC 类型按 rooms 池随机混合，速度在 speedRange 内随机（同类型也有快有慢）。
+//   B = 双向双车道（仅 NPC2）
+//   C = 三车道（NPC2/3）
+//   D = 五车道（NPC5/3/4，红旗所在）
+const VEHICLE_CONFIGS = {
+  'B': {
+    types: ['2'],
+    lanes: [
+      { x: 340, dir: -1, speedRange: [130, 340], starts: [600, 220] },
+      { x: 780, dir:  1, speedRange: [130, 340], starts: [140, 520] }
+    ]
+  },
+  'C': {
+    types: ['2', '3'],
+    lanes: [
+      { x: 267, dir: -1, speedRange: [130, 340], starts: [620, 200] },
+      { x: 560, dir:  1, speedRange: [130, 340], starts: [120, 440] },
+      { x: 853, dir: -1, speedRange: [130, 340], starts: [520, 100] }
+    ]
+  },
+  'D': {
+    types: ['5', '3', '4'],
+    lanes: [
+      { x: 132, dir: -1, speedRange: [170, 420], starts: [600, 180] },
+      { x: 320, dir:  1, speedRange: [170, 420], starts: [140, 520] },
+      { x: 508, dir: -1, speedRange: [170, 420], starts: [620, 200] },
+      { x: 696, dir:  1, speedRange: [170, 420], starts: [120, 480] },
+      { x: 884, dir: -1, speedRange: [170, 420], starts: [520, 100] }
+    ]
+  }
+};
+
+// ---- Game State ----
+const state = {
+  inventory: [],            // 物品栏（右侧栏，可拖拽）
+  backpack: [],             // 背包（背包面板，max 9）
+  currentRoom: 'A',
+  navEnabled: false,        // 接受任务后才出现向右切换 UI
+  npc1TalkCount: 0,
+  flagCollected: false,     // 是否已拾取小红旗
+  helmetGiven: false,       // 是否已把小红旗交给 NPC1
+  gameCleared: false,
+  playerVisible: false,
+  playerX: 72, playerY: 360,      // 玩家中心逻辑坐标
+  playerFacing: 'right',          // left / right 视图
+  roomBEntry: 'left',             // roomB 进入侧（决定出生点）
+  vehicles: [],
+  keys: {},
+  moveVector: { x: 0, y: 0 },     // 虚拟摇杆向量
+  joystickActive: false,
+  paused: false,
+  dialogActive: false,
+  graceUntil: 0,                  // 无敌时间（被撞/拾取后）
+  moveHintShown: false,
+  lastTime: 0,
+  playerEl: null,
+  vehiclesEl: null
+};
+
+// ---- Audio ----
+let musicVolume = 0.7, sfxVolume = 0.8;
+let audioCtx = null;
+let bgmStarted = false;
+let bgmDroneOscs = [];
+
+function getAudioCtx() {
+  if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+  return audioCtx;
+}
+
+function playSound(type) {
+  const el = document.getElementById('sfx-' + type);
+  if (el && sfxVolume > 0.01) {
+    const clone = el.cloneNode();
+    clone.volume = sfxVolume;
+    clone.play().catch(function() {});
+  }
+}
+
+function playSuccessJingle() {
+  if (sfxVolume < 0.01) return;
+  try {
+    const ctx = getAudioCtx();
+    const now = ctx.currentTime;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(sfxVolume * 0.4, now);
+    gain.connect(ctx.destination);
+    const notes = [523.25, 659.25, 783.99, 1046.50];
+    notes.forEach(function(freq, i) {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+      const noteGain = ctx.createGain();
+      const t0 = now + i * 0.12;
+      noteGain.gain.setValueAtTime(0, t0);
+      noteGain.gain.linearRampToValueAtTime(sfxVolume * 0.3, t0 + 0.04);
+      noteGain.gain.linearRampToValueAtTime(0, t0 + 0.35);
+      osc.connect(noteGain);
+      noteGain.connect(gain);
+      osc.start(t0);
+      osc.stop(t0 + 0.4);
+    });
+  } catch (e) { /* silent */ }
+}
+
+function startBgm() {
+  bgmStarted = true;
+  const bgm = document.getElementById('bgm');
+  if (bgm) { bgm.volume = musicVolume * 0.4; bgm.play().catch(function() {}); }
+  try {
+    const ctx = getAudioCtx();
+    if (bgmDroneOscs.length) return;
+    const now = ctx.currentTime;
+    [55, 82.41, 110].forEach(function(f, i) {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = f;
+      const gain = ctx.createGain();
+      gain.gain.value = musicVolume * 0.04 / 2;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      bgmDroneOscs.push({ osc: osc, gain: gain });
+    });
+  } catch (e) { /* silent */ }
+}
+
+function stopBgm() {
+  bgmStarted = false;
+  const bgm = document.getElementById('bgm');
+  if (bgm) { bgm.pause(); bgm.currentTime = 0; }
+  bgmDroneOscs.forEach(function(o) {
+    try { o.osc.stop(); } catch (e) {}
+    try { o.gain.disconnect(); } catch (e) {}
+  });
+  bgmDroneOscs = [];
+}
+
+// ---- Dialog & Speech Bubble ----
+let dialogTimer = null;
+let speechTimers = {};
+let dialogClickCallback = null;
+
+function showDialog(text, duration) {
+  hideDialog();
+  const box = document.getElementById('dialog-box');
+  box.textContent = text;
+  box.classList.add('visible');
+  playSound('dialog');
+  state.dialogActive = true;
+  // 统一：对话框不自动消失，点击对话框范围区域后才消失；显示期间锁定游戏界面
+  document.getElementById('dialog-lock').classList.add('show');
+}
+
+// 持久对话框：点击对话框本身继续（用于正式剧情对白）
+function showDialogPersistent(text, callback) {
+  hideDialog();
+  const box = document.getElementById('dialog-box');
+  box.textContent = text;
+  box.classList.add('visible');
+  box.style.cursor = "url('images/cursor-default.png') 2 2, auto";
+  playSound('dialog');
+  state.dialogActive = true;
+  dialogClickCallback = callback;
+  // 统一：对话框不自动消失，点击对话框范围区域后才消失并执行后续
+  document.getElementById('dialog-lock').classList.add('show');
+}
+
+function hideDialog() {
+  if (dialogTimer) { clearTimeout(dialogTimer); dialogTimer = null; }
+  dialogClickCallback = null;
+  const box = document.getElementById('dialog-box');
+  box.classList.remove('visible');
+  box.style.cursor = '';
+  state.dialogActive = false;
+  hideBubbles();
+  document.getElementById('dialog-lock').classList.remove('show');
+}
+
+function attachDialogClickHandler() {
+  document.getElementById('dialog-box').addEventListener('click', function() {
+    if (dialogClickCallback) {
+      const cb = dialogClickCallback;
+      dialogClickCallback = null;
+      hideDialog();
+      if (cb) cb();
+    } else {
+      hideDialog();
+    }
+  });
+}
+
+function showBubble(id, text) {
+  const el = document.getElementById('bubble-' + id);
+  if (!el) return;
+  if (speechTimers['bubble-' + id]) clearTimeout(speechTimers['bubble-' + id]);
+  el.textContent = text;
+  el.classList.add('show');
+  playSound('dialog');
+  speechTimers['bubble-' + id] = setTimeout(function() {
+    el.classList.remove('show');
+    delete speechTimers['bubble-' + id];
+  }, 2000);
+}
+
+function hideBubbles() {
+  Object.keys(speechTimers).forEach(function(k) {
+    clearTimeout(speechTimers[k]);
+    delete speechTimers[k];
+  });
+  document.querySelectorAll('.speech-bubble').forEach(function(el) { el.classList.remove('show'); });
+}
+
+// ---- Inventory ----
+function addItem(id) {
+  const existing = state.inventory.find(function(i) { return i.id === id; });
+  if (existing) { existing.count++; }
+  else { state.inventory.push({ id: id, count: 1 }); }
+  renderInventory();
+}
+
+function removeItem(id, count) {
+  const idx = state.inventory.findIndex(function(i) { return i.id === id; });
+  if (idx < 0) return;
+  if (!count || state.inventory[idx].count <= count) { state.inventory.splice(idx, 1); }
+  else { state.inventory[idx].count -= count; }
+  renderInventory();
+}
+
+function renderInventory() {
+  const inv = document.getElementById('ui-inventory');
+  inv.innerHTML = '';
+  state.inventory.forEach(function(item) {
+    const slot = document.createElement('div');
+    slot.className = 'inv-slot';
+    const itemDiv = document.createElement('div');
+    itemDiv.className = 'inv-item';
+    itemDiv.setAttribute('data-item-id', item.id);
+    itemDiv.style.backgroundImage = "url('images/item-" + item.id + ".png')";
+    itemDiv.addEventListener('mousedown', startManualDrag);
+    itemDiv.addEventListener('touchstart', touchStart, { passive: false });
+    slot.appendChild(itemDiv);
+    if (item.count > 1) {
+      const badge = document.createElement('span');
+      badge.className = 'inv-count';
+      badge.textContent = item.count;
+      slot.appendChild(badge);
+    }
+    inv.appendChild(slot);
+  });
+}
+
+// ---- Backpack ----
+// ---- 返回 Level0（获得通关道具后，左上角出现返回按钮） ----
+const RETURN_LEVEL_NUM = 2;
+const RETURN_ITEM_ID = 'helmet';
+
+function updateReturnBtn() {
+  const btn = document.getElementById('return-btn');
+  if (!btn) return;
+  let has = false;
+  try { const s = JSON.parse(localStorage.getItem('linkgame_backpack') || '[]'); has = s.indexOf(RETURN_ITEM_ID) !== -1; } catch (e) {}
+  btn.style.display = has ? 'flex' : 'none';
+}
+
+function returnToLevel0() {
+  try { localStorage.setItem('linkgame_pendingReturn', String(RETURN_LEVEL_NUM)); } catch (e) {}
+  window.location.href = '../Demo_Level0/index.html';
+}
+
+window.addEventListener('DOMContentLoaded', updateReturnBtn);
+
+function addBackpackItem(id) {
+  if (state.backpack.length >= 9) return;
+  state.backpack.push(id);
+  // 跨关卡同步：把本关道具合并进共享背包键（Demo_Level0 通关检测用）
+  try {
+    const shared = JSON.parse(localStorage.getItem('linkgame_backpack') || '[]');
+    state.backpack.forEach(pid => { if (shared.indexOf(pid) === -1) shared.push(pid); });
+    localStorage.setItem('linkgame_backpack', JSON.stringify(shared));
+  } catch (e) {}
+  updateReturnBtn();
+  renderBackpack();
+  // 获得本关通关物品 → 对话框提示返回地铁站
+  if (id === RETURN_ITEM_ID) showDialog('点击左上角返回地铁站吧！');
+}
+
+function renderBackpack() {
+  const grid = document.getElementById('backpack-grid');
+  if (!grid) return;
+  const slots = grid.querySelectorAll('.bp-slot');
+  slots.forEach(function(slot, i) {
+    slot.innerHTML = '';
+    slot.classList.remove('drag-over-target');
+    if (i < state.backpack.length) {
+      const itemDiv = document.createElement('div');
+      itemDiv.className = 'bp-item';
+      itemDiv.setAttribute('data-item-id', state.backpack[i]);
+      itemDiv.style.backgroundImage = "url('images/item-" + state.backpack[i] + ".png')";
+      itemDiv.addEventListener('mousedown', startManualDrag);
+      itemDiv.addEventListener('touchstart', touchStart, { passive: false });
+      slot.appendChild(itemDiv);
+    }
+  });
+}
+
+function toggleBackpack() {
+  const overlay = document.getElementById('backpack-overlay');
+  const settingsOverlay = document.getElementById('settings-overlay');
+  if (settingsOverlay.classList.contains('show')) { settingsOverlay.classList.remove('show'); }
+  overlay.classList.toggle('show');
+  if (overlay.classList.contains('show')) { playSound('click'); renderBackpack(); }
+}
+
+// ---- Settings ----
+function toggleSettings() {
+  const overlay = document.getElementById('settings-overlay');
+  const backpackOverlay = document.getElementById('backpack-overlay');
+  if (backpackOverlay.classList.contains('show')) { backpackOverlay.classList.remove('show'); }
+  overlay.classList.toggle('show');
+  if (overlay.classList.contains('show')) playSound('click');
+}
+
+function onMusicVolume(value) {
+  musicVolume = parseInt(value) / 100;
+  document.getElementById('vol-music-label').textContent = value;
+  localStorage.setItem(VOLUME_PREFIX + 'music_vol', value);
+  const bgmEl = document.getElementById('bgm');
+  if (bgmEl) bgmEl.volume = musicVolume * 0.4;
+  if (musicVolume > 0.01 && !bgmStarted) {
+    startBgm();
+  } else if (musicVolume <= 0.01 && bgmStarted) {
+    stopBgm();
+  }
+}
+
+function onSfxVolume(value) {
+  sfxVolume = parseInt(value) / 100;
+  document.getElementById('vol-sfx-label').textContent = value;
+  localStorage.setItem(VOLUME_PREFIX + 'sfx_vol', value);
+}
+
+function openExternalLink() { playSound('click'); window.open('https://link-project.super.site/', '_blank'); }
+
+function loadSettings() {
+  const mv = localStorage.getItem(VOLUME_PREFIX + 'music_vol');
+  const sv = localStorage.getItem(VOLUME_PREFIX + 'sfx_vol');
+  if (mv !== null) {
+    musicVolume = parseInt(mv) / 100;
+    document.getElementById('vol-music').value = mv;
+    document.getElementById('vol-music-label').textContent = mv;
+  }
+  if (sv !== null) {
+    sfxVolume = parseInt(sv) / 100;
+    document.getElementById('vol-sfx').value = sv;
+    document.getElementById('vol-sfx-label').textContent = sv;
+  }
+}
+
+// ---- Pickup Modal ----
+let pendingPickupItem = null;
+
+function showPickupModal(itemId, itemName) {
+  pendingPickupItem = itemId;
+  document.getElementById('pickup-item-img').style.backgroundImage = "url('images/item-" + itemId + ".png')";
+  document.getElementById('pickup-item-name').textContent = itemName;
+  document.getElementById('pickup-overlay').classList.add('visible');
+  playSound('pickup');
+}
+
+function confirmPickup() {
+  const itemId = pendingPickupItem;
+  if (itemId) {
+    pendingPickupItem = null;
+    document.getElementById('pickup-overlay').classList.remove('visible');
+    addBackpackItem(itemId);
+    if (itemId === 'helmet') {
+      // 头盔 = 通关道具：确认即通关（不再弹出恭喜通关提示语）
+      state.gameCleared = true;
+      playSound('success');
+      playSuccessJingle();
+    }
+  } else {
+    document.getElementById('pickup-overlay').classList.remove('visible');
+  }
+}
+
+function anyOverlayOpen() {
+  return document.getElementById('pickup-overlay').classList.contains('visible') ||
+         document.getElementById('settings-overlay').classList.contains('show') ||
+         document.getElementById('backpack-overlay').classList.contains('show');
+}
+
+// ---- Room Navigation ----
+function changeRoom(dir) {
+  if (state.currentRoom !== 'A' || dir !== 1) return;   // 仅 roomA → roomB 的向右 UI
+  if (!state.navEnabled) return;
+  if (state.flagCollected) return;   // 捡旗返回后不可再去马路
+  if (anyOverlayOpen()) return;
+  state.roomBEntry = 'left';
+  enterRoom('B', 72, 360);
+}
+
+function updateNavVisibility() {
+  const nl = document.getElementById('nav-left');
+  const nr = document.getElementById('nav-right');
+  nl.classList.remove('visible');
+  // 捡到红旗并返回 roomA 后，去掉切换箭头，玩家不可再去 roomB/C
+  nr.classList.toggle('visible', state.currentRoom === 'A' && state.navEnabled && !state.flagCollected);
+}
+
+function updateLaneMarkers() {
+  // 车道虚线分割线已按需求移除：所有分割线一律隐藏
+  document.querySelectorAll('.lane-marker').forEach(function(el) { el.style.display = 'none'; });
+}
+
+function enterRoom(room, px, py) {
+  state.currentRoom = room;
+  document.querySelectorAll('.room').forEach(function(r) { r.classList.remove('active-room'); });
+  document.getElementById('room-' + room).classList.add('active-room');
+  updateLaneMarkers();
+
+  if (room === 'A') {
+    state.playerVisible = false;
+    state.playerX = 72; state.playerY = 360;
+  } else {
+    state.playerVisible = true;
+    state.playerX = px; state.playerY = py;
+  }
+  renderPlayer();
+
+  setupVehicles(room);
+  updateFlagEntity();
+  showJoystick();
+
+  hideDialog();
+  updateNavVisibility();
+  playSound('nav');
+
+  // 首次进入 roomB：给出操作提示
+  if (room === 'B' && !state.moveHintShown) {
+    state.moveHintShown = true;
+    const hint = deviceInfo.isMobileDevice
+      ? '拖动左下角摇杆控制移动，躲开车辆，穿过马路！'
+      : '用 WASD 或方向键控制移动，躲开车辆，穿过马路！';
+    setTimeout(function() { showDialog(hint, 2600); }, 400);
+  }
+  // 首次进入 roomD：红旗位置提示
+  if (room === 'D' && !state.flagCollected) {
+    setTimeout(function() { showBubble('flag', '红旗就在马路对面！'); }, 600);
+  }
+}
+
+// ---- Vehicles ----
+function setupVehicles(room) {
+  state.vehicles = [];
+  const container = document.getElementById('vehicles');
+  container.innerHTML = '';
+  const cfg = VEHICLE_CONFIGS[room];
+  if (!cfg) return;
+  cfg.lanes.forEach(function(lane) {
+    lane.starts.forEach(function(sy) {
+      // 单条车道内按房间 types 池随机混合，速度在车道范围内随机（快慢不一）
+      const type = cfg.types[Math.floor(Math.random() * cfg.types.length)];
+      const speed = lane.speedRange[0] + Math.random() * (lane.speedRange[1] - lane.speedRange[0]);
+      const v = {
+        type: type,
+        x: lane.x,
+        y: sy,
+        speed: speed,
+        dir: lane.dir,
+        el: null
+      };
+      const el = document.createElement('div');
+      el.className = 'entity vehicle vehicle-' + type;
+      el.style.transform = 'translate3d(' + (v.x - VEHICLE_W / 2) + 'px, ' + (v.y - VEHICLE_H / 2) + 'px, 0)';
+      el.style.width = VEHICLE_W + 'px';
+      el.style.height = VEHICLE_H + 'px';
+      // NPC2/3/4 按行驶方向使用不同贴图：dir=-1 自底向上 → up；dir=1 自顶向下 → down
+      el.style.backgroundImage = "url('images/npc-" + type + ((lane.dir === -1) ? '-up' : '-down') + ".png')";
+      container.appendChild(el);
+      v.el = el;
+      state.vehicles.push(v);
+    });
+  });
+}
+
+// ---- Player ----
+function renderPlayer() {
+  if (!state.playerEl) return;
+  if (!state.playerVisible) { state.playerEl.style.display = 'none'; return; }
+  state.playerEl.style.display = 'block';
+  state.playerEl.style.transform = 'translate3d(' + (state.playerX - PLAYER_SIZE / 2) + 'px, ' + (state.playerY - PLAYER_SIZE / 2) + 'px, 0)';
+  state.playerEl.style.backgroundImage = (state.playerFacing === 'right')
+    ? "url('images/player-right.png')"
+    : "url('images/player-left.png')";
+}
+
+function setFacing(f) {
+  if (state.playerFacing !== f) { state.playerFacing = f; renderPlayer(); }
+}
+
+function respawnPlayer() {
+  // 捡到红旗后从右侧返回左侧途中被撞 → 重生到房间右侧；未捡旗（去程）→ 左侧
+  if (state.currentRoom === 'B' || state.currentRoom === 'C') {
+    state.playerX = state.flagCollected ? 1048 : 72;
+    state.playerY = 360;
+  } else if (state.currentRoom === 'D') {
+    state.playerX = state.flagCollected ? 1084 : 72;
+    state.playerY = 360;
+  }
+  renderPlayer();
+}
+
+// ---- Flag ----
+function updateFlagEntity() {
+  const f = document.getElementById('entity-flag');
+  f.style.display = (state.currentRoom === 'D' && !state.flagCollected) ? 'block' : 'none';
+}
+
+function flagRect() {
+  return { l: FLAG.x - FLAG.half, r: FLAG.x + FLAG.half, t: FLAG.y - FLAG.half, b: FLAG.y + FLAG.half };
+}
+
+function pickupFlag() {
+  if (state.flagCollected || state.currentRoom !== 'D') return;
+  state.flagCollected = true;
+  state.graceUntil = performance.now() + 1500;
+  hideBubbles();
+  updateFlagEntity();
+  addItem('redflag');                 // 小红旗进入物品栏（可拖拽）
+  updateNPC1DropTarget();
+  playSound('collect');
+  showDialog('现在原路返回到城市英雄那里，把红旗还给他吧！', 4000);
+}
+
+// ---- NPC1 (城市英雄) ----
+function updateNPC1DropTarget() {
+  const npc1 = document.getElementById('entity-npc1');
+  if (state.flagCollected && !state.helmetGiven) {
+    npc1.setAttribute('data-drop-target', 'npc1');
+  } else {
+    npc1.removeAttribute('data-drop-target');
+  }
+}
+
+// 领取头盔对白（交旗后统一入口：拖拽延迟弹窗与 NPC1 点击均走此处，避免重复文案）
+function promptHelmet() {
+  showDialogPersistent('以后你在这条路上走路记得要戴头盔哦，我把这个捡到的头盔送给你。', function() {
+    showPickupModal('helmet', '头盔');
+  });
+}
+
+function handleNPC1Click() {
+  if (state.gameCleared) {
+    showDialog('行人注意佩戴头盔，小心慢行~');
+    return;
+  }
+  if (state.flagCollected && !state.helmetGiven) {
+    // 已有小红旗 → 引导拖拽交给 NPC1（点击关闭提示）
+    showDialogPersistent('太好了你捡到小红旗了，快给我吧', function() {});
+    return;
+  }
+  if (state.helmetGiven) {
+    // 红旗已交给 NPC1、头盔待领取：重新引导领取头盔。
+    // 修复：此状态绝不可弹任务台词，否则 showDialog 会清掉等待中的头盔对白回调
+    // （小概率领不到头盔 + 台词卡在最开始那一句）
+    promptHelmet();
+    return;
+  }
+  if (state.npc1TalkCount === 0) {
+    // 首次对话：接下任务
+    showDialogPersistent('我的小红旗飘到马路对面去了！你帮我把它找回来吧！我要靠它指挥交通！', function() {
+      state.npc1TalkCount = 1;
+      state.navEnabled = true;
+      updateNavVisibility();
+    });
+    return;
+  }
+  showDialog('我的小红旗飘到马路对面去了！你帮我把它找回来吧！我要靠它指挥交通！');
+}
+
+function interact() {
+  if (anyOverlayOpen()) return;
+  if (state.currentRoom === 'A') {
+    handleNPC1Click();
+  } else if (state.currentRoom === 'D' && !state.flagCollected) {
+    // 按 E 在红旗旁拾取
+    const half = PLAYER_SIZE / 2;
+    const pr = { l: state.playerX - half, r: state.playerX + half, t: state.playerY - half, b: state.playerY + half };
+    const fr = flagRect();
+    if (pr.l < fr.r && pr.r > fr.l && pr.t < fr.b && pr.b > fr.t) {
+      pickupFlag();
+    }
+  }
+}
+
+// ---- Input (Keyboard) ----
+const MOVE_CODES = { KeyW: 1, KeyA: 1, KeyS: 1, KeyD: 1, ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1 };
+
+window.addEventListener('keydown', function(e) {
+  const code = e.code;
+  if (MOVE_CODES[code] || code === 'KeyE' || code === 'Space') e.preventDefault();
+  if (MOVE_CODES[code]) state.keys[code] = true;
+  if (code === 'KeyE' && !e.repeat) interact();
+});
+window.addEventListener('keyup', function(e) {
+  const code = e.code;
+  if (MOVE_CODES[code]) delete state.keys[code];
+});
+
+// ---- Input (Virtual Joystick) ----
+const joystickEl = document.getElementById('joystick');
+const joystickKnob = document.getElementById('joystick-knob');
+const JOY_RADIUS = 55;
+const PLAYER_SPEED = 280;   // 与 gameLoop 角色移动速度保持一致
+let joyCenterX = 0, joyCenterY = 0;
+let lastJoyMove = 0;        // 上次摇杆驱动位移的时间戳（用于 touchmove 直接位移）
+
+function showJoystick() {
+  joystickEl.style.display = (deviceInfo.isMobileDevice && state.currentRoom !== 'A') ? 'block' : 'none';
+}
+
+joystickEl.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const t = e.touches[0];
+  const rect = joystickEl.getBoundingClientRect();
+  joyCenterX = rect.left + rect.width / 2;
+  joyCenterY = rect.top + rect.height / 2;
+  state.joystickActive = true;
+  lastJoyMove = 0;
+  updateJoystick(t);
+}, { passive: false });
+
+document.addEventListener('touchmove', function(e) {
+  if (!state.joystickActive) return;
+  e.preventDefault();
+  updateJoystick(e.touches[0]);
+}, { passive: false });
+
+document.addEventListener('touchend', function() { endJoystick(); });
+document.addEventListener('touchcancel', function() { endJoystick(); });
+
+function updateJoystick(t) {
+  // 屏幕坐标增量 → 游戏容器本地坐标（消除 scale 与旋转的影响）
+  let dx = (t.clientX - joyCenterX) / (window._gameScale || 1);
+  let dy = (t.clientY - joyCenterY) / (window._gameScale || 1);
+  if (document.getElementById('game-container').classList.contains('rotated')) {
+    const tmp = dx; dx = dy; dy = -tmp;   // 旋转 90°：本地 x = 屏幕 y，本地 y = -屏幕 x
+  }
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len > JOY_RADIUS) { dx = dx / len * JOY_RADIUS; dy = dy / len * JOY_RADIUS; }
+  joystickKnob.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
+  const vx = dx / JOY_RADIUS, vy = dy / JOY_RADIUS;
+  state.moveVector = { x: vx, y: vy };
+  // 摇杆直接驱动角色位移：随手指即时响应，不等下一帧 rAF（消除迟滞）
+  if (state.paused || state.currentRoom === 'A' || (state.dialogActive && state.currentRoom === 'B')) { lastJoyMove = 0; return; }
+  const now = performance.now();
+  if (!lastJoyMove) lastJoyMove = now;
+  let jdt = (now - lastJoyMove) / 1000;
+  lastJoyMove = now;
+  if (jdt > 0.1) jdt = 0.1;   // 仅防长时间停顿后的跳变；正常事件间隔不受影响
+  state.playerX += vx * PLAYER_SPEED * jdt;
+  state.playerY += vy * PLAYER_SPEED * jdt;
+  if (vx > 0.01) setFacing('right');
+  else if (vx < -0.01) setFacing('left');
+  applyBounds();
+  renderPlayer();
+}
+
+function endJoystick() {
+  if (!state.joystickActive) return;
+  state.joystickActive = false;
+  joystickKnob.style.transform = 'translate(0, 0)';
+  state.moveVector = { x: 0, y: 0 };
+  lastJoyMove = 0;
+}
+
+function computeMoveVector() {
+  if (state.joystickActive) {
+    const v = state.moveVector;
+    if (v.x !== 0 || v.y !== 0) return v;
+  }
+  const k = state.keys;
+  let x = 0, y = 0;
+  if (k['ArrowRight'] || k['KeyD']) x += 1;
+  if (k['ArrowLeft']  || k['KeyA']) x -= 1;
+  if (k['ArrowDown']  || k['KeyS']) y += 1;
+  if (k['ArrowUp']    || k['KeyW']) y -= 1;
+  const len = Math.sqrt(x * x + y * y);
+  if (len > 0) { x /= len; y /= len; }
+  return { x: x, y: y };
+}
+
+// 边界钳制：去程（未捡旗）只能前进，B/C/D 均不可向左回退上一房间；
+//          返程（已捡旗）只能后退，B/C 不可向右回到下一房间（D 本无右出口）
+function applyBounds() {
+  const half = PLAYER_SIZE / 2;
+  let minX = half, maxX = 1120 - half, minY = half, maxY = 720 - half;
+  if (!state.flagCollected) {
+    if (state.currentRoom === 'B' || state.currentRoom === 'C' || state.currentRoom === 'D') minX = 56;
+  } else {
+    if (state.currentRoom === 'B' || state.currentRoom === 'C') maxX = 1056;
+  }
+  state.playerX = Math.max(minX, Math.min(maxX, state.playerX));
+  state.playerY = Math.max(minY, Math.min(maxY, state.playerY));
+}
+
+// ---- Game Loop ----
+function gameLoop(t) {
+  requestAnimationFrame(gameLoop);
+  if (!state.lastTime) state.lastTime = t;
+  let dt = (t - state.lastTime) / 1000;
+  state.lastTime = t;
+  if (dt > 0.05) dt = 0.05;
+
+  state.paused = anyOverlayOpen();
+  if (state.paused) return;
+  if (state.currentRoom === 'A') return;
+
+  // 玩家移动（摇杆激活时由 touchmove 直接驱动角色，此处仅处理键盘）
+  // roomB：对话框点击消失之前，玩家不可移动
+  if (!state.joystickActive && !(state.dialogActive && state.currentRoom === 'B')) {
+    const vec = computeMoveVector();
+    const speed = PLAYER_SPEED;
+    state.playerX += vec.x * speed * dt;
+    state.playerY += vec.y * speed * dt;
+    if (vec.x > 0.01) setFacing('right');
+    else if (vec.x < -0.01) setFacing('left');
+  }
+  applyBounds();
+  renderPlayer();
+
+  // 车辆移动
+  state.vehicles.forEach(function(v) {
+    v.y += v.speed * v.dir * dt;
+    if (v.y < -60) v.y = 720 + 60;
+    if (v.y > 780) v.y = -60;
+    v.el.style.transform = 'translate3d(' + (v.x - VEHICLE_W / 2) + 'px, ' + (v.y - VEHICLE_H / 2) + 'px, 0)';
+  });
+
+  // 碰撞检测（无敌时间内不判定）
+  const now = performance.now();
+  if (now > state.graceUntil) {
+    // 车辆碰撞：水平方向双方判定框都按贴图收窄（玩家约 70% 宽、车辆约 80% 宽），
+    // 避免从车辆侧面擦过时过早判定相撞；垂直方向仍用完整高度
+    const halfW = PLAYER_SIZE * 0.35;
+    const halfH = PLAYER_SIZE / 2;
+    const pr = { l: state.playerX - halfW, r: state.playerX + halfW, t: state.playerY - halfH, b: state.playerY + halfH };
+    for (let i = 0; i < state.vehicles.length; i++) {
+      const v = state.vehicles[i];
+      const hw = VEHICLE_W * 0.4, hh = VEHICLE_H / 2;
+      const vr = { l: v.x - hw, r: v.x + hw, t: v.y - hh, b: v.y + hh };
+      if (pr.l < vr.r && pr.r > vr.l && pr.t < vr.b && pr.b > vr.t) {
+        onHit();
+        break;
+      }
+    }
+  }
+
+  handleRoomEdges();
+}
+
+function onHit() {
+  playSound('fail');
+  state.graceUntil = performance.now() + 600;
+  respawnPlayer();
+}
+
+function handleRoomEdges() {
+  if (state.currentRoom === 'B') {
+    if (state.playerX >= EXIT_RIGHT_X) {
+      enterRoom('C', 72, 360);
+    } else if (state.flagCollected && state.playerX <= EXIT_LEFT_X) {
+      // 捡到红旗后才可从左侧返回 roomA
+      enterRoom('A', 72, 360);
+    }
+  } else if (state.currentRoom === 'C') {
+    if (state.playerX >= EXIT_RIGHT_X) {
+      enterRoom('D', 72, 360);
+    } else if (state.playerX <= EXIT_LEFT_X) {
+      // 左侧离开 → 回到 roomB（从右侧进入）
+      enterRoom('B', 1048, 360);
+    }
+  } else if (state.currentRoom === 'D') {
+    if (state.flagCollected && state.playerX <= EXIT_LEFT_X) {
+      // 捡到红旗后从左侧离开 → 回到 roomC（从右侧进入）
+      enterRoom('C', 1048, 360);
+    } else if (!state.flagCollected) {
+      // 与红旗重叠 → 自动拾取（也支持按 E）
+      const half = PLAYER_SIZE / 2;
+      const pr = { l: state.playerX - half, r: state.playerX + half, t: state.playerY - half, b: state.playerY + half };
+      const fr = flagRect();
+      if (pr.l < fr.r && pr.r > fr.l && pr.t < fr.b && pr.b > fr.t) {
+        pickupFlag();
+      }
+    }
+  }
+}
+
+// ---- Drop Handler ----
+function handleDrop(itemId, targetId, targetEl) {
+  if (targetId === 'npc1' && itemId === 'redflag' && state.flagCollected && !state.helmetGiven) {
+    removeItem('redflag', 1);
+    state.helmetGiven = true;
+    updateNPC1DropTarget();
+    hideDialog();
+    playSound('collect');
+    setTimeout(function() {
+      if (state.gameCleared) return;   // 玩家已通过其它路径领到头盔 → 不再重复弹出
+      promptHelmet();
+    }, 300);
+  }
+}
+
+// ---- Drag Engine (Manual, template §5) ----
+let dragCursorFollower = null;
+let dragState = null;
+let justDragged = false;   // 拖拽结束后短暂抑制随之而来的 click
+
+function ensureCursorFollower() {
+  if (!dragCursorFollower) {
+    dragCursorFollower = document.createElement('div');
+    dragCursorFollower.id = 'drag-cursor-follower';
+    dragCursorFollower.style.backgroundImage = "url('images/cursor-grabbing.png')";
+    document.body.appendChild(dragCursorFollower);
+  }
+}
+function removeCursorFollower() { if (dragCursorFollower) { dragCursorFollower.remove(); dragCursorFollower = null; } }
+function cleanupDrag() {
+  if (dragState && dragState.clone) dragState.clone.remove();
+  if (dragState && dragState.started) {
+    justDragged = true;
+    setTimeout(function() { justDragged = false; }, 0);
+  }
+  dragState = null;
+  document.body.classList.remove('dragging');
+  removeCursorFollower();
+  document.querySelectorAll('.drag-over-target').forEach(function(el) { el.classList.remove('drag-over-target'); });
+}
+
+function startManualDrag(e) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  if (anyOverlayOpen()) return;
+  const itemEl = e.currentTarget;
+  const itemId = itemEl.getAttribute('data-item-id');
+  if (!itemId) return;
+  const clone = document.createElement('div');
+  clone.style.cssText = `
+    position: fixed; pointer-events: none; z-index: 99998;
+    width: ${itemEl.offsetWidth}px; height: ${itemEl.offsetHeight}px;
+    background-image: ${itemEl.style.backgroundImage};
+    background-size: contain; background-repeat: no-repeat; background-position: center;
+    opacity: 0.85; display: none; transform: translate(-50%, -50%);
+  `;
+  document.body.appendChild(clone);
+  dragState = { itemId: itemId, sourceEl: itemEl, startX: e.clientX, startY: e.clientY, started: false, clone: clone };
+}
+
+document.addEventListener('mousemove', function(e) {
+  if (!dragState) return;
+  const dx = e.clientX - dragState.startX, dy = e.clientY - dragState.startY;
+  if (!dragState.started) {
+    if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+    dragState.started = true;
+    document.body.classList.add('dragging');
+    ensureCursorFollower();
+    dragState.clone.style.display = 'block';
+  }
+  dragState.clone.style.left = e.clientX + 'px';
+  dragState.clone.style.top = e.clientY + 'px';
+  if (dragCursorFollower) { dragCursorFollower.style.left = e.clientX + 'px'; dragCursorFollower.style.top = e.clientY + 'px'; }
+  const elUnder = document.elementFromPoint(e.clientX, e.clientY);
+  const dropTarget = elUnder && elUnder.closest && elUnder.closest('[data-drop-target]');
+  document.querySelectorAll('.drag-over-target').forEach(function(el) { if (el !== dropTarget) el.classList.remove('drag-over-target'); });
+  if (dropTarget && !dropTarget.classList.contains('drag-over-target')) dropTarget.classList.add('drag-over-target');
+});
+
+document.addEventListener('mouseup', function(e) {
+  if (!dragState) return;
+  if (dragState.started) {
+    const elUnder = document.elementFromPoint(e.clientX, e.clientY);
+    const dropTarget = elUnder && elUnder.closest && elUnder.closest('[data-drop-target]');
+    if (dropTarget) handleDrop(dragState.itemId, dropTarget.dataset.dropTarget, dropTarget);
+  }
+  cleanupDrag();
+});
+
+document.getElementById('game-container').addEventListener('mouseleave', function() { if (dragState) cleanupDrag(); });
+
+// ---- Touch Drag ----
+function touchStart(e) {
+  if (e.touches.length !== 1) return;
+  if (anyOverlayOpen()) return;
+  const touch = e.touches[0];
+  const itemEl = e.currentTarget;
+  const itemId = itemEl.getAttribute('data-item-id');
+  if (!itemId) return;
+  const clone = document.createElement('div');
+  clone.style.cssText = `
+    position: fixed; pointer-events: none; z-index: 99998;
+    width: ${itemEl.offsetWidth}px; height: ${itemEl.offsetHeight}px;
+    background-image: ${itemEl.style.backgroundImage};
+    background-size: contain; background-repeat: no-repeat; background-position: center;
+    opacity: 0.85; display: block; transform: translate(-50%, -50%);
+    left: ${touch.clientX}px; top: ${touch.clientY}px;
+  `;
+  document.body.appendChild(clone);
+  dragState = { itemId: itemId, sourceEl: itemEl, startX: touch.clientX, startY: touch.clientY, started: true, clone: clone };
+  document.body.classList.add('dragging');
+  ensureCursorFollower();
+  if (dragCursorFollower) { dragCursorFollower.style.left = touch.clientX + 'px'; dragCursorFollower.style.top = touch.clientY + 'px'; }
+  e.preventDefault();
+}
+
+document.addEventListener('touchmove', function(e) {
+  if (!dragState || !dragState.started) return;
+  const touch = e.touches[0];
+  dragState.clone.style.left = touch.clientX + 'px';
+  dragState.clone.style.top = touch.clientY + 'px';
+  if (dragCursorFollower) { dragCursorFollower.style.left = touch.clientX + 'px'; dragCursorFollower.style.top = touch.clientY + 'px'; }
+  const elUnder = document.elementFromPoint(touch.clientX, touch.clientY);
+  const dropTarget = elUnder && elUnder.closest && elUnder.closest('[data-drop-target]');
+  document.querySelectorAll('.drag-over-target').forEach(function(el) { if (el !== dropTarget) el.classList.remove('drag-over-target'); });
+  if (dropTarget && !dropTarget.classList.contains('drag-over-target')) dropTarget.classList.add('drag-over-target');
+}, { passive: false });
+
+document.addEventListener('touchend', function(e) {
+  if (!dragState) return;
+  if (dragState.started) {
+    const touch = e.changedTouches[0];
+    const elUnder = document.elementFromPoint(touch.clientX, touch.clientY);
+    const dropTarget = elUnder && elUnder.closest && elUnder.closest('[data-drop-target]');
+    if (dropTarget) handleDrop(dragState.itemId, dropTarget.dataset.dropTarget, dropTarget);
+  }
+  cleanupDrag();
+});
+
+// ---- Inventory Scroll Drag ----
+(function initInventoryScroll() {
+  const inv = document.getElementById('ui-inventory');
+  let isDragging = false, startY = 0, scrollTop = 0;
+  inv.addEventListener('mousedown', function(ev) {
+    if (ev.target.classList.contains('inv-item')) return;
+    isDragging = true; startY = ev.clientY; scrollTop = inv.scrollTop;
+    inv.style.cursor = "url('images/cursor-grabbing.png') 16 16, grabbing";
+    ev.preventDefault();
+  });
+  document.addEventListener('mousemove', function(ev) {
+    if (!isDragging) return;
+    inv.scrollTop = scrollTop - (ev.clientY - startY) * 1.5;
+  });
+  document.addEventListener('mouseup', function() { isDragging = false; inv.style.cursor = ''; });
+  inv.addEventListener('mouseleave', function() { isDragging = false; inv.style.cursor = ''; });
+})();
+
+// ---- Initialization ----
+function initGame() {
+  state.playerEl = document.getElementById('entity-player');
+  state.vehiclesEl = document.getElementById('vehicles');
+
+  loadSettings();
+  attachDialogClickHandler();
+  updateNavVisibility();
+  renderInventory();
+  renderBackpack();
+  renderPlayer();
+  updateFlagEntity();
+  updateNPC1DropTarget();
+  setupVehicles('A');
+  showJoystick();
+
+  // NPC1 点击
+  document.getElementById('entity-npc1').addEventListener('click', function(e) {
+    if (justDragged) return;
+    handleNPC1Click();
+  });
+
+  requestAnimationFrame(gameLoop);
+
+  // 横屏提示（事件绑定放在初始化函数末尾）
+  document.getElementById('landscape-hint').addEventListener('click', function(e) { if (e.target === e.currentTarget) dismissLandscapeHint(); });
+  document.getElementById('landscape-hint-close').addEventListener('click', dismissLandscapeHint);
+
+  // 首交互启动 BGM
+  const startBgmOnInteract = function() {
+    if (musicVolume > 0.01) startBgm();
+    document.removeEventListener('click', startBgmOnInteract);
+    document.removeEventListener('touchstart', startBgmOnInteract);
+  };
+  document.addEventListener('click', startBgmOnInteract);
+  document.addEventListener('touchstart', startBgmOnInteract);
+
+  console.log('🎮 奠基大道中 — Rusty Lake inspired point & click game');
+  console.log('  Room A: 点击 NPC1 接下任务 → 向右进入 Room B');
+  console.log('  Room B: 双车道，WASD/方向键或摇杆移动，躲开 NPC2/3，抵达右侧进入 Room C');
+  console.log('  Room C: 三车道，躲开 NPC3/4，抵达右侧拾取红旗，向左返回 Room B');
+  console.log('  Room A: 把小红旗拖给 NPC1，获得头盔即通关');
+}
+
+window.addEventListener('DOMContentLoaded', initGame);
+</script>
+</body>
+</html>
